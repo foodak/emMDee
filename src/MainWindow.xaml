@@ -1,0 +1,219 @@
+<Window x:Class="emMDee.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:emMDee"
+        xmlns:views="clr-namespace:emMDee.Views"
+        mc:Ignorable="d"
+        Title="emMDee — Markdown Viewer"
+        Icon="pack://application:,,,/Resources/app.ico"
+        Height="600" Width="900"
+        MinHeight="300" MinWidth="400"
+        Background="{DynamicResource ContentBackground}"
+        AllowDrop="True"
+        DragEnter="Window_DragEnter"
+        Drop="Window_Drop">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+    </Window.Resources>
+
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenFileCommand}"/>
+        <KeyBinding Key="F" Modifiers="Control" Command="{Binding ToggleSearchCommand}"/>
+        <KeyBinding Key="F" Modifiers="Control+Shift" Command="{Binding FindInAllTabsCommand}"/>
+        <KeyBinding Key="F3" Command="{Binding FindNextCommand}"/>
+        <KeyBinding Key="F3" Modifiers="Shift" Command="{Binding FindPreviousCommand}"/>
+        <KeyBinding Key="W" Modifiers="Control" Command="{Binding CloseTabCommand}"/>
+        <KeyBinding Key="C" Modifiers="Control+Shift" Command="{Binding CopyAsMarkdownCommand}"/>
+    </Window.InputBindings>
+
+    <DockPanel>
+        <!-- Menu -->
+        <Menu DockPanel.Dock="Top"
+              Background="{DynamicResource ChromeBackground}"
+              Foreground="{DynamicResource ChromeForeground}">
+            <MenuItem Header="_File"
+                      Background="{DynamicResource ChromeBackground}"
+                      Foreground="{DynamicResource ChromeForeground}">
+                <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
+                <MenuItem Header="Open _Recent"
+                          ItemsSource="{Binding RecentFiles}"
+                          Visibility="{Binding HasRecentFiles, Converter={StaticResource BoolToVisibility}}">
+                    <MenuItem.ItemContainerStyle>
+                        <Style TargetType="MenuItem">
+                            <Setter Property="Header" Value="{Binding DisplayName}"/>
+                            <Setter Property="ToolTip" Value="{Binding DisplayPath}"/>
+                            <Setter Property="Command"
+                                    Value="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=DataContext.OpenRecentFileCommand}"/>
+                            <Setter Property="CommandParameter" Value="{Binding FilePath}"/>
+                            <Setter Property="Background" Value="{DynamicResource ChromeBackground}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource ChromeForeground}"/>
+                        </Style>
+                    </MenuItem.ItemContainerStyle>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Close Tab" Command="{Binding CloseTabCommand}" InputGestureText="Ctrl+W"/>
+                <Separator/>
+                <MenuItem Header="E_xit" Command="{Binding ExitCommand}" InputGestureText="Alt+F4"/>
+            </MenuItem>
+            <MenuItem Header="_Edit"
+                      Background="{DynamicResource ChromeBackground}"
+                      Foreground="{DynamicResource ChromeForeground}">
+                <MenuItem Header="_Copy" Command="{Binding CopyAsRichCommand}" InputGestureText="Ctrl+C" ToolTip="Copy with formatting (HTML + plain text)"/>
+                <MenuItem Header="Copy as _Markdown" Command="{Binding CopyAsMarkdownCommand}" InputGestureText="Ctrl+Shift+C" ToolTip="Copy the raw markdown source"/>
+                <Separator/>
+                <MenuItem Header="_Find..." Command="{Binding ToggleSearchCommand}" InputGestureText="Ctrl+F"/>
+                <MenuItem Header="Find in Open _Files..." Command="{Binding FindInAllTabsCommand}" InputGestureText="Ctrl+Shift+F"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- Search bar -->
+        <Border x:Name="SearchBar"
+                DockPanel.Dock="Top"
+                Background="{DynamicResource SearchBarBackground}"
+                Padding="8,6"
+                Visibility="{Binding IsSearchVisible, Converter={StaticResource BoolToVisibility}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding SearchBarLabel}" VerticalAlignment="Center" Margin="0,0,8,0"
+                           Foreground="{DynamicResource ChromeForeground}"/>
+                <TextBox x:Name="SearchBox"
+                         Grid.Column="1"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         MinWidth="200"
+                         Background="{DynamicResource TabBackground}"
+                         Foreground="{DynamicResource ChromeForeground}"
+                         CaretBrush="{DynamicResource ChromeForeground}"
+                         BorderBrush="{DynamicResource ChromeBorderBrush}"
+                         KeyDown="SearchBox_KeyDown"/>
+                <Button Grid.Column="2" Content="▲ Prev" Margin="4,0,2,0" Padding="6,2"
+                        Background="{DynamicResource TabBackground}"
+                        Foreground="{DynamicResource ChromeForeground}"
+                        BorderBrush="{DynamicResource ChromeBorderBrush}"
+                        Command="{Binding FindPreviousCommand}"/>
+                <Button Grid.Column="3" Content="Next ▼" Margin="2,0,4,0" Padding="6,2"
+                        Background="{DynamicResource TabBackground}"
+                        Foreground="{DynamicResource ChromeForeground}"
+                        BorderBrush="{DynamicResource ChromeBorderBrush}"
+                        Command="{Binding FindNextCommand}"/>
+                <Button Grid.Column="4" Content="✕" Margin="6,0,0,0" Padding="6,2"
+                        Background="Transparent"
+                        Foreground="{DynamicResource ChromeForeground}"
+                        BorderThickness="0"
+                        ToolTip="Close"
+                        Command="{Binding ToggleSearchCommand}"/>
+            </Grid>
+        </Border>
+
+        <!-- Tab area -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Tab headers (custom tab strip) -->
+            <Border Grid.Row="0"
+                    BorderBrush="{DynamicResource ChromeBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Background="{DynamicResource ChromeBackground}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <ListBox x:Name="TabHeaders"
+                             ItemsSource="{Binding Tabs}"
+                             SelectedItem="{Binding ActiveTab}"
+                             SelectionMode="Single"
+                             BorderThickness="0"
+                             Background="Transparent">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ChromeBorderBrush}"
+                                        BorderThickness="1,1,1,0"
+                                        Background="{DynamicResource TabBackground}"
+                                        Padding="10,6"
+                                        Margin="0,0,0,0"
+                                        CornerRadius="4,4,0,0"
+                                        Cursor="Hand">
+                                    <DockPanel>
+                                        <Button Content="✕"
+                                                DockPanel.Dock="Right"
+                                                Margin="8,0,0,0"
+                                                Padding="4,0"
+                                                FontSize="10"
+                                                Background="Transparent"
+                                                Foreground="{DynamicResource ChromeForeground}"
+                                                BorderThickness="0"
+                                                Cursor="Hand"
+                                                Click="CloseTabButton_Click"
+                                                Tag="{Binding}"/>
+                                        <TextBlock Text="{Binding Title}"
+                                                   VerticalAlignment="Center"
+                                                   MaxWidth="200"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource ChromeForeground}"/>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <!-- Drop zone overlay for tabs area -->
+                </Grid>
+            </Border>
+
+            <!-- Content area -->
+            <Grid Grid.Row="1"
+                  AllowDrop="True"
+                  DragEnter="TabContent_DragEnter"
+                  Drop="TabContent_Drop">
+                <views:MarkdownPreviewControl x:Name="PreviewControl" Visibility="Collapsed"/>
+                <StackPanel x:Name="WelcomePanel"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Visibility="Visible">
+                    <Image Source="pack://application:,,,/Resources/welcome.jpg"
+                           Width="120"
+                           Height="120"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Margin="0,0,0,16"/>
+                    <TextBlock x:Name="WelcomeText"
+                               Text="Drop a .md file here or use File → Open (Ctrl+O) to get started."
+                               HorizontalAlignment="Center"
+                               Foreground="#888"
+                               FontSize="16"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Status bar -->
+            <StatusBar Grid.Row="2" DockPanel.Dock="Bottom"
+                       Background="{DynamicResource ChromeBackground}">
+                <StatusBarItem>
+                    <TextBlock Text="{Binding ActiveTab.FilePath, TargetNullValue='No file open'}"
+                               Foreground="{DynamicResource ChromeForeground}"/>
+                </StatusBarItem>
+                <Separator/>
+                <StatusBarItem HorizontalAlignment="Right">
+                    <TextBlock x:Name="StatusText" Text="Ready"
+                               Foreground="{DynamicResource ChromeForeground}"/>
+                </StatusBarItem>
+            </StatusBar>
+        </Grid>
+    </DockPanel>
+</Window>
