@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1a1a1a;
+    --code-bg: #f4f4f4;
+    --border: #e0e0e0;
+    --quote: #666;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e1e;
+      --text: #d4d4d4;
+      --code-bg: #2d2d2d;
+      --border: #444;
+      --quote: #999;
+    }
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    padding: 20px 48px;
+    max-width: 920px;
+    margin: 0 auto;
+    line-height: 1.7;
+    color: var(--text);
+    background: var(--bg);
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 16px 20px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 0.9em;
+    line-height: 1.5;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    text-align: left;
+  }
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+  blockquote {
+    border-left: 4px solid #4a9eff;
+    margin: 12px 0;
+    padding: 4px 20px;
+    color: var(--quote);
+  }
+  img {
+    max-width: 100%;
+    border-radius: 4px;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    margin-top: 24px;
+    margin-bottom: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  h1 { font-size: 2em; border-bottom: 2px solid var(--border); padding-bottom: 8px; }
+  h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  a { color: #4a9eff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+  ul, ol { padding-left: 24px; }
+
+  .search-highlight {
+    background-color: #FFEB3B;
+    color: #000;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .search-highlight-current {
+    background-color: #FF9800;
+    color: #000;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+
+</style>
+</head>
+<body>
+
+<div id="content">
+  <p><em>Open a markdown file to see the preview.</em></p>
+</div>
+
+<script src="marked.min.js"></script>
+<script>
+  // --- Markdown Rendering ---
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,
+      gfm: true
+    });
+  }
+
+  // Tracks source positions for each rendered element so we can extract
+  // raw markdown corresponding to a DOM selection.
+  var _sourceRanges = [];   // [{el: DOM element, start: number, end: number}]
+
+  function renderMarkdown(md, baseUrl, scrollY) {
+    // Reset source range tracking
+    _sourceRanges = [];
+    rawMarkdown = md;
+
+    // If a scroll position was requested, cache it so the in-preview
+    // render helper can restore it after images finish loading.
+    _pendingScrollY = (typeof scrollY === 'number') ? scrollY : null;
+
+    var html;
+    if (typeof marked !== 'undefined') {
+      // Tokenize to get source positions, then render with position
+      // annotations so each block-level element knows its origin.
+      var tokens = marked.lexer(md);
+      var pos = 0;
+      for (var i = 0; i < tokens.length; i++) {
+        tokens[i]._mdStart = pos;
+        if (typeof tokens[i].raw === 'string') {
+          pos += tokens[i].raw.length;
+        }
+        tokens[i]._mdEnd = pos;
+      }
+      html = marked.parser(tokens);
+    } else {
+      html = '<pre>' + escapeHtml(md) + '</pre>';
+    }
+
+    var content = document.getElementById('content');
+    content.innerHTML = html;
+
+    // Walk block-level children and assign source-range data attributes.
+    // We re-tokenize to find corresponding spans in the raw markdown
+    // for each rendered DOM block.
+    _annotateSourceRanges(content, tokens, md);
+
+    if (baseUrl) {
+      content.querySelectorAll('img').forEach(function(img) {
+        var src = img.getAttribute('src');
+        if (src && !/^(https?:|file:|data:)/i.test(src)) {
+          try { img.src = new URL(src, baseUrl).href; } catch (e) {}
+        }
+      });
+      content.querySelectorAll('a').forEach(function(a) {
+        var href = a.getAttribute('href');
+        if (href && !/^(https?:|mailto:|file:|data:|#)/i.test(href)) {
+          try { a.href = new URL(href, baseUrl).href; } catch (e) {}
+        }
+      });
+    }
+
+    // Restore scroll position after all images have loaded (or decoded
+    // for data: URIs). Without this, scrollTo fires before images expand
+    // the layout and the restored position drifts.
+    _restoreScrollAfterImages();
+  }
+
+  var _pendingScrollY = null;
+
+  function _restoreScrollAfterImages() {
+    if (_pendingScrollY === null) return;
+    var target = _pendingScrollY;
+    _pendingScrollY = null;
+
+    var images = document.querySelectorAll('#content img');
+    var pending = 0;
+    var settled = false;
+
+    function apply() {
+      if (settled) return;
+      settled = true;
+      window.scrollTo(0, target);
+    }
+
+    if (images.length === 0) {
+      // No images — apply after one animation frame to let layout finish.
+      requestAnimationFrame(function() { requestAnimationFrame(apply); });
+      return;
+    }
+
+    // Wait for images to complete loading/decoding.
+    images.forEach(function(img) {
+      if (img.complete) return;
+      pending++;
+      img.addEventListener('load',  function() { pending--; if (pending === 0) apply(); });
+      img.addEventListener('error', function() { pending--; if (pending === 0) apply(); });
+    });
+
+    if (pending === 0) {
+      // All images were already complete (e.g. data: URIs may complete
+      // synchronously). Still wait one animation frame for layout.
+      requestAnimationFrame(function() { requestAnimationFrame(apply); });
+      return;
+    }
+
+    // Safety timeout: if images never settle (e.g. loading spinners),
+    // scroll after 2 seconds anyway.
+    setTimeout(function() {
+      if (!settled) apply();
+    }, 2000);
+  }
+
+  // Annotate rendered DOM elements with data-md-start / data-md-end
+  // so getSelectedMarkdown() can map selections back to raw source.
+  function _annotateSourceRanges(contentRoot, tokens, rawMd) {
+    var blockIndex = 0;
+    // Walk direct children of #content (each corresponds to a top-level token)
+    var child = contentRoot.firstChild;
+    while (child) {
+      if (child.nodeType === 1 && blockIndex < tokens.length) {
+        // HTML elements only
+        var tok = tokens[blockIndex];
+        if (tok._mdStart !== undefined && tok._mdEnd !== undefined) {
+          child.setAttribute('data-md-start', tok._mdStart);
+          child.setAttribute('data-md-end', tok._mdEnd);
+          _sourceRanges.push({ el: child, start: tok._mdStart, end: tok._mdEnd });
+        }
+        blockIndex++;
+      } else if (child.nodeType === 3) {
+        // Whitespace text node from blank lines still consumes a position-aware token
+        if (blockIndex < tokens.length && tokens[blockIndex].type === 'space') {
+          blockIndex++;
+        }
+      }
+      child = child.nextSibling;
+    }
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>');
+  }
+
+  // --- Search ---
+  var searchMatches = [];
+  var currentMatchIndex = -1;
+
+  function searchText(query, direction, fromStart) {
+    if (fromStart) currentMatchIndex = -1;
+
+    // Strip existing highlights from TEXT NODES only (preserves element attributes)
+    clearSearchMarks();
+
+    if (!query) return false;
+
+    // Only search text nodes — never corrupt href/src attributes inside elements.
+    var content = document.getElementById('content');
+    var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    var textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    var regex = new RegExp(escapeRegex(query), 'gi');
+    var matchCount = 0;
+    searchMatches = [];
+
+    for (var i = 0; i < textNodes.length; i++) {
+      var node = textNodes[i];
+      var parent = node.parentNode;
+      if (!parent) continue;
+      // Skip text inside <script>, <style>, <mark> (not searchable)
+      var tag = parent.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'MARK') continue;
+
+      var text = node.textContent;
+      var match;
+      var lastIndex = 0;
+      var frag = document.createDocumentFragment();
+      regex.lastIndex = 0;
+      var hasMatch = false;
+
+      while ((match = regex.exec(text)) !== null) {
+        hasMatch = true;
+        // Text before the match
+        if (match.index > lastIndex) {
+          frag.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
+        }
+        // The matched text wrapped in <mark>
+        var mark = document.createElement('mark');
+        mark.className = 'search-highlight';
+        mark.setAttribute('data-search-idx', matchCount);
+        mark.textContent = match[0];
+        frag.appendChild(mark);
+        searchMatches.push(mark);
+        matchCount++;
+        lastIndex = regex.lastIndex;
+        if (match[0].length === 0) regex.lastIndex++; // avoid infinite loop on zero-length match
+      }
+      // Remaining text after last match
+      if (hasMatch && lastIndex < text.length) {
+        frag.appendChild(document.createTextNode(text.substring(lastIndex)));
+      }
+      if (hasMatch) {
+        parent.replaceChild(frag, node);
+      }
+    }
+
+    if (searchMatches.length === 0) {
+      currentMatchIndex = -1;
+      return true;
+    }
+
+    var wrapped = false;
+    if (direction === 'prev') {
+      if (currentMatchIndex <= 0) {
+        wrapped = currentMatchIndex === 0;
+        currentMatchIndex = searchMatches.length - 1;
+      } else {
+        currentMatchIndex--;
+      }
+    } else {
+      if (currentMatchIndex >= searchMatches.length - 1) {
+        wrapped = currentMatchIndex !== -1;
+        currentMatchIndex = 0;
+      } else {
+        currentMatchIndex++;
+      }
+    }
+
+    highlightCurrent();
+    return wrapped;
+  }
+
+  function highlightCurrent() {
+    searchMatches.forEach(function(el, i) {
+      el.className = (i === currentMatchIndex) ? 'search-highlight-current' : 'search-highlight';
+    });
+    if (searchMatches[currentMatchIndex]) {
+      searchMatches[currentMatchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function clearSearchMarks() {
+    // Remove all <mark> elements (search highlights) and restore their text content.
+    // Uses DOM manipulation instead of innerHTML replacement to preserve element attributes.
+    var marks = document.querySelectorAll('#content mark[data-search-idx]');
+    for (var i = marks.length - 1; i >= 0; i--) {
+      var m = marks[i];
+      var parent = m.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(m.textContent), m);
+        parent.normalize(); // merge adjacent text nodes
+      }
+    }
+  }
+
+  function clearSearch() {
+    clearSearchMarks();
+    searchMatches = [];
+    currentMatchIndex = -1;
+  }
+
+  function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // --- Copy ---
+  var rawMarkdown = '';
+
+  function setRawMarkdown(md) {
+    rawMarkdown = md;
+  }
+
+  function getRawMarkdown() {
+    return rawMarkdown;
+  }
+
+  // Light-theme inline styles applied to copied content. Without this, copying
+  // while the preview is in dark mode pastes white text on dark backgrounds in
+  // Word, and bare <code>/<pre> tags lose their box styling entirely.
+  var COPY_STYLES = {
+    'pre':        "background:#f4f4f4;color:#1a1a1a;padding:12px 16px;border-radius:6px;font-family:Consolas,'Courier New',monospace;font-size:0.9em;white-space:pre-wrap;overflow-x:auto;",
+    'code':       "background:#f4f4f4;color:#1a1a1a;padding:2px 6px;border-radius:4px;font-family:Consolas,'Courier New',monospace;font-size:0.9em;",
+    'blockquote': "border-left:4px solid #4a9eff;margin-left:0;padding-left:16px;color:#555;",
+    'table':      "border-collapse:collapse;",
+    'th':         "border:1px solid #e0e0e0;padding:8px 12px;background:#f4f4f4;text-align:left;font-weight:600;",
+    'td':         "border:1px solid #e0e0e0;padding:8px 12px;text-align:left;",
+    'h1':         "border-bottom:2px solid #e0e0e0;padding-bottom:6px;",
+    'h2':         "border-bottom:1px solid #e0e0e0;padding-bottom:4px;",
+    'a':          "color:#1a73e8;",
+    'hr':         "border:none;border-top:1px solid #e0e0e0;"
+  };
+
+  function applyCopyStyles(root) {
+    var selector = Object.keys(COPY_STYLES).join(',');
+    var nodes = root.querySelectorAll(selector);
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var s = COPY_STYLES[el.tagName.toLowerCase()];
+      if (s) el.setAttribute('style', s + (el.getAttribute('style') || ''));
+    }
+    // <pre><code> nested: the <pre> already provides the box; clear the inner <code>.
+    var preCodes = root.querySelectorAll('pre code');
+    for (var j = 0; j < preCodes.length; j++) {
+      preCodes[j].setAttribute('style', "background:transparent;padding:0;font-family:Consolas,'Courier New',monospace;");
+    }
+  }
+
+  // Builds a clean, light-theme HTML+text snapshot for the clipboard.
+  // If a selection exists, returns the selection's content; otherwise the whole document.
+  function buildCopyPayload() {
+    var selection = window.getSelection();
+    var hasSelection = !!(selection && !selection.isCollapsed && selection.toString().length > 0);
+    var div = document.createElement('div');
+    var text;
+    if (hasSelection) {
+      for (var i = 0; i < selection.rangeCount; i++) {
+        div.appendChild(selection.getRangeAt(i).cloneContents());
+      }
+      text = selection.toString();
+    } else {
+      var content = document.getElementById('content');
+      var clone = content.cloneNode(true);
+      while (clone.firstChild) div.appendChild(clone.firstChild);
+      text = content.innerText;
+    }
+    applyCopyStyles(div);
+    return { html: div.innerHTML, text: text, hasSelection: hasSelection };
+  }
+
+  // Called from the C# host (menu / context-menu "Copy"). Returns JSON.
+  function getCopyPayload() {
+    return JSON.stringify(buildCopyPayload());
+  }
+
+  // Extracts the raw markdown text corresponding to the current DOM selection
+  // by walking up from selected nodes to find data-md-start/data-md-end attributes.
+  // Returns the raw markdown substring that corresponds to the current
+  // DOM selection. Uses block-level source annotations (data-md-start / data-md-end)
+  // from marked.js tokenization and limits the range to only the blocks that
+  // contain the selection's start and end points.
+  function getSelectedMarkdown() {
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return '';
+
+    var range = selection.getRangeAt(0);
+    if (!range || range.collapsed) return '';
+
+    // Find the closest element with data-md-start in its ancestry
+    function findBlock(node) {
+      while (node) {
+        if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-md-start'))
+          return node;
+        node = node.parentNode;
+      }
+      return null;
+    }
+
+    var startBlock = findBlock(range.startContainer);
+    var endBlock   = findBlock(range.endContainer);
+    if (!startBlock || !endBlock) return '';
+
+    var start = parseInt(startBlock.getAttribute('data-md-start'), 10);
+    var end   = parseInt(endBlock.getAttribute('data-md-end'),   10);
+    if (isNaN(start) || isNaN(end)) return '';
+
+    // If selection spans multiple blocks, include all blocks between start and end.
+    // But only blocks whose ENTIRE content intersects the selection range — this
+    // prevents the "document start" problem where a block that merely contains
+    // the selection start (like a large <blockquote>) gets pulled in entirely.
+    if (startBlock !== endBlock) {
+      var allBlocks = document.getElementById('content').querySelectorAll('[data-md-start]');
+      var inRange = false;
+      var minStart = start;
+      var maxEnd = end;
+      for (var i = 0; i < allBlocks.length; i++) {
+        var blk = allBlocks[i];
+        if (blk === startBlock) { inRange = true; }
+        if (inRange) {
+          var bs = parseInt(blk.getAttribute('data-md-start'), 10);
+          var be = parseInt(blk.getAttribute('data-md-end'),   10);
+          if (!isNaN(bs) && !isNaN(be)) {
+            if (bs < minStart) minStart = bs;
+            if (be > maxEnd)   maxEnd   = be;
+          }
+        }
+        if (blk === endBlock) break;
+      }
+      start = minStart;
+      end   = maxEnd;
+    }
+    // Single-block selection: return the whole block's source range.
+    // (The block is the smallest unit we can resolve accurately.)
+
+    return rawMarkdown.substring(Math.max(0, start), Math.min(rawMarkdown.length, end));
+  }
+
+  // Ctrl+Shift+C inside the preview: extracts the selected raw markdown and
+  // posts it back to the C# host. WebView2 doesn't bubble key events to WPF
+  // KeyBindings, so this is the in-preview equivalent of the Window-level binding.
+  document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'C' || e.key === 'c')) {
+      e.preventDefault();
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ type: 'copy-as-markdown' });
+      }
+    }
+  });
+
+  // Override Ctrl+C / drag-copy so the clipboard gets the same clean, light-theme
+  // HTML the menu produces, instead of the browser default's computed-style HTML
+  // (which bakes in dark-mode colours and ends up white-on-dark in Word).
+  // No-selection Ctrl+C falls through to buildCopyPayload's whole-document branch.
+  document.addEventListener('copy', function(e) {
+    var payload = buildCopyPayload();
+    e.clipboardData.setData('text/html', payload.html);
+    e.clipboardData.setData('text/plain', payload.text);
+    e.preventDefault();
+  });
+
+  // Expose renderMarkdown globally (called from C# via ExecuteScriptAsync)
+  // Save the internal render function before replacing the global name
+  var _renderMarkdown = renderMarkdown;
+  window.renderMarkdown = function(md, baseUrl, scrollY) {
+    setRawMarkdown(md);
+    _renderMarkdown(md, baseUrl, scrollY);
+  };
+
+  // Expose for C# to retrieve selected markdown
+  window.getSelectedMarkdown = getSelectedMarkdown;
+
+   // Expose for C# to check if there is a non-collapsed selection
+   window.hasSelection = function() {
+     var s = window.getSelection();
+     return !!(s && !s.isCollapsed && s.toString().length > 0);
+   };
+
+   // --- Context Menu Target Detection ---
+   // WebView2's built-in context menu target doesn't detect images inside links
+   // (the link "wins"). We capture the real right-clicked element here and
+   // store it on window.__ctxInfo so the C# host can read it synchronously
+   // during the context-menu deferral callback.
+   document.addEventListener('contextmenu', function(e) {
+     var img = e.target.closest('img, picture');
+     if (img && img.tagName === 'PICTURE') {
+       img = img.querySelector('img');
+     }
+     var a = e.target.closest('a');
+     window.__ctxInfo = {
+       hasImage: !!img,
+       imageSrc: img ? (img.getAttribute('src') || img.src) : null,
+       hasLink: !!a,
+       linkHref: a ? (a.getAttribute('href') || a.href) : null
+     };
+   });
+</script>
+</body>
+</html>
