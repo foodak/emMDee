@@ -319,6 +319,26 @@ public class MainViewModel : ObservableObject, IDisposable
         OpenFileByPath(filePath);
     }
 
+    /// <summary>
+    /// Moves a tab from <paramref name="fromIndex"/> to <paramref name="toIndex"/>
+    /// (the visual insertion point) and makes it the active tab.
+    /// Handles the index shift caused by removing the source before inserting.
+    /// </summary>
+    public void MoveTab(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= Tabs.Count) return;
+        if (toIndex < 0 || toIndex > Tabs.Count) return;
+        if (fromIndex == toIndex) return;
+
+        var tab = Tabs[fromIndex];
+        Tabs.RemoveAt(fromIndex);
+
+        // When removing from before the target, the target shifts left by 1.
+        int insertAt = toIndex > fromIndex ? toIndex - 1 : toIndex;
+        Tabs.Insert(insertAt, tab);
+        ActiveTab = tab;
+    }
+
     public void CloseTab(Models.TabItem? tab)
     {
         if (tab == null && ActiveTab != null)

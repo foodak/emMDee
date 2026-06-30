@@ -131,7 +131,12 @@
             <Border Grid.Row="0"
                     BorderBrush="{DynamicResource ChromeBorderBrush}"
                     BorderThickness="0,0,0,1"
-                    Background="{DynamicResource ChromeBackground}">
+                    Background="{DynamicResource ChromeBackground}"
+                    AllowDrop="True"
+                    PreviewDragEnter="TabStrip_PreviewDragEnter"
+                    PreviewDragOver="TabStrip_PreviewDragOver"
+                    Drop="TabStrip_Drop"
+                    DragLeave="TabStrip_DragLeave">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -142,7 +147,10 @@
                              SelectedItem="{Binding ActiveTab}"
                              SelectionMode="Single"
                              BorderThickness="0"
-                             Background="Transparent">
+                             Background="Transparent"
+                             PreviewMouseLeftButtonDown="TabHeaders_PreviewMouseLeftButtonDown"
+                             PreviewMouseMove="TabHeaders_PreviewMouseMove"
+                             GiveFeedback="TabHeaders_GiveFeedback">
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal"/>
@@ -187,7 +195,15 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <!-- Drop zone overlay for tabs area -->
+                    <!-- Tab drag-and-drop insertion caret (overlays the ListBox) -->
+                    <Canvas Grid.Column="0" IsHitTestVisible="False" x:Name="TabDropCaretCanvas">
+                        <Border x:Name="TabDropCaret"
+                                Width="2"
+                                Background="#4A9EFF"
+                                CornerRadius="1"
+                                Visibility="Collapsed"
+                                IsHitTestVisible="False"/>
+                    </Canvas>
                 </Grid>
             </Border>
 

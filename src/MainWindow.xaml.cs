@@ -27,6 +27,11 @@ public partial class MainWindow : Window
     private double _savedZoomFactor;
     private Models.TabItem? _previousActiveTab;
 
+    // Tab drag-and-drop state
+    private Point _tabDragStartPoint;
+    private bool _isDraggingTab;
+    private Models.TabItem? _dragSourceTab;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -352,5 +357,215 @@ public partial class MainWindow : Window
     {
         var tab = _viewModel.ActiveTab;
         if (tab != null) _ = PreviewControl.CopyAsMarkdownAsync(tab.MarkdownContent);
+    }
+
+    // ── Tab drag-and-drop reordering ──────────────────────────────────
+
+    private void TabHeaders_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // Don't start a drag if the click was on the close button.
+        if (IsDescendantOfCloseButton(e.OriginalSource as DependencyObject))
+            return;
+
+        _tabDragStartPoint = e.GetPosition(null);
+        _isDraggingTab = false;
+        _dragSourceTab = HitTestTab(e.GetPosition(TabHeaders));
+    }
+
+    private void TabHeaders_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isDraggingTab || _dragSourceTab == null)
+            return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        var currentPos = e.GetPosition(null);
+        if (Math.Abs(currentPos.X - _tabDragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(currentPos.Y - _tabDragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        _isDraggingTab = true;
+        DragDrop.DoDragDrop(TabHeaders, _dragSourceTab, DragDropEffects.Move);
+        _isDraggingTab = false;
+        _dragSourceTab = null;
+        TabDropCaret.Visibility = Visibility.Collapsed;
+    }
+
+    private void TabHeaders_GiveFeedback(object sender, GiveFeedbackEventArgs e)
+    {
+        // Suppress the default OLE drag cursor (which flashes the no-entry icon
+        // whenever the mouse passes over a non-drop-target child element). We use
+        // the standard arrow cursor throughout the drag.
+        e.UseDefaultCursors = false;
+        e.Handled = true;
+    }
+
+    private void TabStrip_PreviewDragEnter(object sender, DragEventArgs e)
+    {
+        // Show the caret immediately when the drag enters the tab strip.
+        if (e.Data.GetDataPresent(typeof(Models.TabItem)) &&
+            e.Data.GetData(typeof(Models.TabItem)) is Models.TabItem draggedTab)
+        {
+            var insertIndex = CalculateInsertIndex(e.GetPosition(TabHeaders));
+            PositionDropCaret(insertIndex);
+            e.Effects = DragDropEffects.Move;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+        e.Handled = true;
+    }
+
+    private void TabStrip_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(typeof(Models.TabItem)))
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        var draggedTab = e.Data.GetData(typeof(Models.TabItem)) as Models.TabItem;
+        if (draggedTab == null)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
+        var insertIndex = CalculateInsertIndex(e.GetPosition(TabHeaders));
+        PositionDropCaret(insertIndex);
+        e.Effects = DragDropEffects.Move;
+        e.Handled = true;
+    }
+
+    private void TabStrip_Drop(object sender, DragEventArgs e)
+    {
+        TabDropCaret.Visibility = Visibility.Collapsed;
+
+        if (!e.Data.GetDataPresent(typeof(Models.TabItem)))
+            return;
+
+        var draggedTab = e.Data.GetData(typeof(Models.TabItem)) as Models.TabItem;
+        if (draggedTab == null)
+            return;
+
+        int sourceIndex = _viewModel.Tabs.IndexOf(draggedTab);
+        if (sourceIndex < 0)
+            return;
+
+        int targetIndex = CalculateInsertIndex(e.GetPosition(TabHeaders));
+        _viewModel.MoveTab(sourceIndex, targetIndex);
+    }
+
+    private void TabStrip_DragLeave(object sender, DragEventArgs e)
+    {
+        // Only hide the caret if we're leaving the entire tab strip, not just
+        // moving between sibling elements inside it. The sender is the Border,
+        // so DragLeave means the mouse actually left the tab strip area.
+        TabDropCaret.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Finds the tab under the mouse point within the ListBox.</summary>
+    private Models.TabItem? HitTestTab(Point point)
+    {
+        for (int i = 0; i < _viewModel.Tabs.Count; i++)
+        {
+            var container = TabHeaders.ItemContainerGenerator.ContainerFromIndex(i) as ListBoxItem;
+            if (container == null) continue;
+
+            var bounds = container.TransformToAncestor(TabHeaders).TransformBounds(
+                new Rect(0, 0, container.ActualWidth, container.ActualHeight));
+            if (bounds.Contains(point))
+                return _viewModel.Tabs[i];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Computes the insertion index for the caret based on horizontal mouse position.
+    /// Returns an index in [0..Count]: 0 means before the first tab; Count means after the last.
+    /// </summary>
+    private int CalculateInsertIndex(Point point)
+    {
+        for (int i = 0; i < _viewModel.Tabs.Count; i++)
+        {
+            var container = TabHeaders.ItemContainerGenerator.ContainerFromIndex(i) as ListBoxItem;
+            if (container == null) continue;
+
+            var bounds = container.TransformToAncestor(TabHeaders).TransformBounds(
+                new Rect(0, 0, container.ActualWidth, container.ActualHeight));
+
+            // The insertion point is before the tab if the mouse is in the left half.
+            if (point.X < bounds.Left + bounds.Width / 2)
+                return i;
+        }
+
+        // Mouse is past the rightmost tab — insert at end.
+        return _viewModel.Tabs.Count;
+    }
+
+    /// <summary>Positions (or hides) the vertical caret at the given insertion index.</summary>
+    private void PositionDropCaret(int insertIndex)
+    {
+        if (insertIndex < 0)
+        {
+            TabDropCaret.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        double leftPos;
+        if (insertIndex >= _viewModel.Tabs.Count)
+        {
+            // Insert after last tab — find the right edge of the last container.
+            var lastContainer = TabHeaders.ItemContainerGenerator
+                .ContainerFromIndex(_viewModel.Tabs.Count - 1) as ListBoxItem;
+            if (lastContainer != null)
+            {
+                var bounds = lastContainer.TransformToAncestor(TabHeaders).TransformBounds(
+                    new Rect(0, 0, lastContainer.ActualWidth, lastContainer.ActualHeight));
+                leftPos = bounds.Right;
+            }
+            else
+            {
+                leftPos = 0;
+            }
+        }
+        else
+        {
+            // Insert before the tab at insertIndex.
+            var container = TabHeaders.ItemContainerGenerator
+                .ContainerFromIndex(insertIndex) as ListBoxItem;
+            if (container != null)
+            {
+                var bounds = container.TransformToAncestor(TabHeaders).TransformBounds(
+                    new Rect(0, 0, container.ActualWidth, container.ActualHeight));
+                leftPos = bounds.Left;
+            }
+            else
+            {
+                leftPos = 0;
+            }
+        }
+
+        Canvas.SetLeft(TabDropCaret, leftPos);
+        Canvas.SetTop(TabDropCaret, 4);
+        TabDropCaret.Height = Math.Max(0, TabHeaders.ActualHeight - 8);
+        TabDropCaret.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Returns true if <paramref name="element"/> is inside the tab's close button.</summary>
+    private static bool IsDescendantOfCloseButton(DependencyObject? element)
+    {
+        while (element != null)
+        {
+            if (element is Button)
+                return true;
+            element = System.Windows.Media.VisualTreeHelper.GetParent(element);
+        }
+
+        return false;
     }
 }
