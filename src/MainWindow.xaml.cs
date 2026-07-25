@@ -332,6 +332,25 @@ public partial class MainWindow : Window
         }
     }
 
+    // --- Tab context menu ---
+
+    private void CopyPathMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && menuItem.DataContext is Models.TabItem tab
+            && !string.IsNullOrEmpty(tab.FilePath))
+        {
+            try { System.Windows.Clipboard.SetText(tab.FilePath, System.Windows.TextDataFormat.UnicodeText); }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                try { System.Windows.Clipboard.SetText(tab.FilePath, System.Windows.TextDataFormat.UnicodeText); }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"CopyPath clipboard failed: {ex.Message}");
+                }
+            }
+        }
+    }
+
     // --- Public API for App.xaml.cs ---
 
     public void OpenFileFromCommandLine(string path)

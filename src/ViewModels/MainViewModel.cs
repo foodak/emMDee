@@ -105,6 +105,7 @@ public class MainViewModel : ObservableObject, IDisposable
     public ICommand FindInAllTabsCommand { get; }
     public ICommand CopyAsRichCommand { get; }
     public ICommand CopyAsMarkdownCommand { get; }
+    public ICommand CopyTabPathCommand { get; }
     public ICommand PrintCommand { get; }
     public ICommand ReloadFromDiskCommand { get; }
     public ICommand DismissFileNotificationCommand { get; }
@@ -145,6 +146,11 @@ public class MainViewModel : ObservableObject, IDisposable
         CopyAsMarkdownCommand = new RelayCommand(
             _ => CopyAsMarkdownAction?.Invoke(),
             _ => ActiveTab != null);
+        CopyTabPathCommand = new RelayCommand(param =>
+        {
+            if (param is Models.TabItem tab && !string.IsNullOrEmpty(tab.FilePath))
+                System.Windows.Clipboard.SetText(tab.FilePath);
+        });
         PrintCommand = new RelayCommand(
             _ => PrintFunc?.Invoke(),
             _ => ActiveTab != null);
