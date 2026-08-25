@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using emMDee.Services;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 
@@ -663,6 +664,32 @@ public partial class MarkdownPreviewControl : UserControl
                 selectAll.CustomItemSelected += (_, _) =>
                     WebView.CoreWebView2.ExecuteScriptAsync("document.execCommand('selectAll');");
                 items.Add(selectAll);
+            }
+
+            // File-level action: always offer opening the rendered file's raw
+            // markdown source in the user's default text editor, no matter what
+            // was right-clicked (text, image, or link).
+            if (!string.IsNullOrEmpty(_lastRenderedFilePath))
+            {
+                var filePath = _lastRenderedFilePath;
+
+                items.Add(env.CreateContextMenuItem(
+                    string.Empty, null, CoreWebView2ContextMenuItemKind.Separator));
+
+                var openInEditor = env.CreateContextMenuItem(
+                    "Open in Text Editor", null, CoreWebView2ContextMenuItemKind.Command);
+                openInEditor.CustomItemSelected += (_, _) =>
+                {
+                    if (!ExternalEditorService.OpenInTextEditor(filePath))
+                    {
+                        MessageBox.Show(
+                            "Could not open the file in a text editor.",
+                            "emMDee",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
+                };
+                items.Add(openInEditor);
             }
         }
         finally

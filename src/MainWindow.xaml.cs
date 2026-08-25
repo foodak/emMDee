@@ -351,6 +351,24 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OpenInTextEditorMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem || menuItem.DataContext is not Models.TabItem tab
+            || string.IsNullOrEmpty(tab.FilePath))
+        {
+            return;
+        }
+
+        if (!ExternalEditorService.OpenInTextEditor(tab.FilePath))
+        {
+            MessageBox.Show(
+                "Could not open the file in a text editor.",
+                "emMDee",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
     // --- Public API for App.xaml.cs ---
 
     public void OpenFileFromCommandLine(string path)

@@ -168,6 +168,8 @@
                                     <Border.ContextMenu>
                                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                             <MenuItem Header="Copy Path" Click="CopyPathMenuItem_Click"/>
+                                            <Separator/>
+                                            <MenuItem Header="Open in Text Editor" Click="OpenInTextEditorMenuItem_Click"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                     <DockPanel>
