@@ -54,6 +54,53 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 }
 Write-Host "gh      : $(gh --version | Select-Object -First 1)"
 
+# ── identity guard ───────────────────────────────────────────────────
+# This is a PUBLIC repo published under one account. More than one GitHub
+# account is logged into gh on this machine, and gh's "active account" is
+# global: whichever was last switched to is the one that signs a release.
+#
+# Getting this wrong once printed "! Failed to create release, 'workflow' scope
+# may be required" - which is a generic 403 hint and sends you looking at token
+# scopes that were fine. The real cause was the active account having only READ
+# on the repo. Git pushes kept working throughout, because git authenticates
+# from the remote URL and not from gh, so the commit landed and only the release
+# was refused.
+#
+# So: check the account BEFORE building anything, name it in the failure, and
+# never let another identity touch this repo.
+$expectedAccount = 'foodak'
+
+$activeAccount = (gh api user --jq '.login' 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $activeAccount) {
+    Write-Error 'gh is not authenticated. Run: gh auth login'
+    exit 1
+}
+
+if ($activeAccount -ne $expectedAccount) {
+    Write-Host ''
+    Write-Error @"
+gh is authenticated as '$activeAccount', but this repo publishes as '$expectedAccount'.
+
+Refusing to continue: a release created by the wrong account would put that
+identity on a public repository.
+
+Fix it with:
+    gh auth switch --user $expectedAccount
+
+and switch back afterwards if you need the other account:
+    gh auth switch --user $activeAccount
+"@
+    exit 1
+}
+Write-Host "account : $activeAccount"
+
+# Read access is not enough, and finding that out after two builds wastes them.
+$permission = (gh repo view --json viewerPermission --jq '.viewerPermission' 2>$null)
+if ($permission -notin @('WRITE', 'MAINTAIN', 'ADMIN')) {
+    Write-Error "Account '$activeAccount' has '$permission' on this repo. Releasing needs WRITE."
+    exit 1
+}
+
 Push-Location $repoRoot
 if (-not (Test-Path '.git')) {
     Write-Error 'Not in a git repository. Run from repo root.'
@@ -100,7 +147,10 @@ Write-Host "Tag    : $newTag"
 header 'Release notes'
 
 $lastCommitMsg = git log -1 --format='%s'
-$lastCommitBody = git log -1 --format='%b'
+# -join is not decoration: a multi-line body comes back from git as an ARRAY of
+# strings, and interpolating an array joins it with SPACES. That is what turned
+# v1.0.4's four bullets into one run-on line on the releases page.
+$lastCommitBody = (git log -1 --format='%b') -join "`n"
 $defaultNotes = if ($lastCommitBody) { "$lastCommitMsg`n`n$lastCommitBody" } else { $lastCommitMsg }
 
 if (-not $Notes) {
