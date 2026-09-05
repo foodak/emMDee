@@ -23,9 +23,18 @@ public partial class MarkdownPreviewControl : UserControl
     // The host should respond by calling CopyAsMarkdown(activeTab.MarkdownContent).
     public event Action? CopyAsMarkdownRequested;
 
+    // Raised when a form control carrying data-answer="<id>" changes in the page.
+    // Arguments: the id, the control kind ("textarea"/"text"/"checkbox"/"select"),
+    // and the new value. The host writes it back into the markdown source; controls
+    // without the attribute never raise this.
+    public event Action<string, string, string>? AnswerFieldChanged;
+
     // Stores target info from the JS contextmenu listener (received via postMessage
     // before OnContextMenuRequested fires). Reset to null after each use.
     private ContextTargetInfo? _lastContextInfo;
+
+    // Remembers which executable link targets the owner has already approved.
+    private readonly Services.TrustedCommandService _trustedCommands = new();
 
     private class ContextTargetInfo
     {
@@ -168,11 +177,7 @@ public partial class MarkdownPreviewControl : UserControl
                             }
                             catch { }
                         }
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = target,
-                            UseShellExecute = true
-                        });
+                        LaunchLinkTarget(target);
                     }
                     catch (Exception ex)
                     {
@@ -499,6 +504,18 @@ public partial class MarkdownPreviewControl : UserControl
             {
                 CopyAsMarkdownRequested?.Invoke();
             }
+            else if (type == "answer-field")
+            {
+                if (doc.RootElement.TryGetProperty("id", out var idEl)
+                    && doc.RootElement.TryGetProperty("kind", out var kindEl)
+                    && doc.RootElement.TryGetProperty("value", out var valueEl))
+                {
+                    var id = idEl.GetString();
+                    var kind = kindEl.GetString();
+                    if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(kind))
+                        AnswerFieldChanged?.Invoke(id, kind, valueEl.GetString() ?? string.Empty);
+                }
+            }
             else if (type == "open-file-link")
             {
                 if (doc.RootElement.TryGetProperty("href", out var hrefEl))
@@ -528,18 +545,7 @@ public partial class MarkdownPreviewControl : UserControl
 
                         if (File.Exists(localPath))
                         {
-                            try
-                            {
-                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                                {
-                                    FileName = localPath,
-                                    UseShellExecute = true
-                                });
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"Failed to open file: {ex.Message}");
-                            }
+                            LaunchLinkTarget(localPath);
                         }
                     }
                 }
@@ -549,6 +555,49 @@ public partial class MarkdownPreviewControl : UserControl
         {
             System.Diagnostics.Debug.WriteLine($"OnWebMessageReceived error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Opens what a link points at — and asks first when the shell would EXECUTE
+    /// it rather than display it.
+    ///
+    /// Both link paths (a navigation the WebView started, and an open-file-link
+    /// the page posted) funnel through here so the guard cannot be bypassed by
+    /// whichever route a given anchor happens to take. A .png, .pdf or https://
+    /// target is unaffected; a .cmd, .exe or .ps1 prompts once and remembers the
+    /// answer against the file's content.
+    /// </summary>
+    private void LaunchLinkTarget(string target)
+    {
+        try
+        {
+            if (!Views.RunCommandDialog.Confirm(Window.GetWindow(this), _trustedCommands, target))
+                return;
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = target,
+                UseShellExecute = true,
+                // Run a command in the folder it lives in, so a script that uses
+                // relative paths behaves as it does when double-clicked.
+                WorkingDirectory = WorkingDirectoryFor(target),
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[emMDee] Failed to open link: {ex.Message}");
+        }
+    }
+
+    private static string WorkingDirectoryFor(string target)
+    {
+        try
+        {
+            if (File.Exists(target) && Path.GetDirectoryName(target) is string dir)
+                return dir;
+        }
+        catch { }
+        return string.Empty;
     }
 
     private void OnContextMenuRequested(object? sender, CoreWebView2ContextMenuRequestedEventArgs args)

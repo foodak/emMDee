@@ -52,6 +52,9 @@ public partial class MainWindow : Window
         _viewModel.CopyAsMarkdownAction = CopyActiveTabAsMarkdown;
         PreviewControl.CopyAsMarkdownRequested += CopyActiveTabAsMarkdown;
 
+        // Opted-in form controls (data-answer="<id>") write their value back to the file.
+        PreviewControl.AnswerFieldChanged += _viewModel.ApplyAnswerField;
+
         // Restore saved window position and zoom factor
         var (left, top, width, height, maximized, zoomFactor) = _viewModel.GetSavedWindowState();
         if (!double.IsNaN(left)) Left = left;

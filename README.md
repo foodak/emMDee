@@ -15,7 +15,9 @@
 
 ## What is emMDee?
 
-emMDee is a desktop Markdown previewer. You throw `.md` files at it and it renders them into clean, properly styled HTML — on the spot. It doesn't edit. It doesn't sync. It just previews, and it does that well.
+emMDee is a desktop Markdown previewer. You throw `.md` files at it and it renders them into clean, properly styled HTML — on the spot. It doesn't sync, and it has no editor. It just previews, and it does that well.
+
+The one deliberate exception is *answer fields*: a document can opt individual form controls into being saved back to the file, so a `.md` written to be filled in — a review, a checklist, a form — can be answered where you read it. Everything else stays read‑only.
 
 Under the hood it uses [marked.js](https://github.com/markedjs/marked) for GitHub‑flavoured Markdown parsing and the Windows WebView2 control for display. The entire UI is native WPF, so it respects your system theme, snaps to your monitor, and stays out of the way.
 
@@ -28,7 +30,10 @@ Under the hood it uses [marked.js](https://github.com/markedjs/marked) for GitHu
 - **Drag & drop** — fling a file anywhere onto the window to open it. Multi‑select in the open dialog is supported too.
 - **Session restore** — open tabs, recent files, window size/position, and zoom level are saved to `%AppData%\emMDee\session.json` and restored when you relaunch.
 - **Search** — Ctrl+F to find text in the current preview; Ctrl+Shift+F searches across all open tabs. Hit F3 to jump through matches.
-- **Copy as Markdown** — select text in the preview, press Ctrl+Shift+C, and the *original* Markdown source lands on your clipboard. Plain Ctrl+C copies rich text (HTML) so pasting into Word or an email preserves formatting.
+- **Copy as Markdown** — select text in the preview, press Ctrl+Shift+C, and the *original* Markdown source lands on your clipboard. Plain Ctrl+C copies rich text (HTML) so pasting into Word or an email preserves formatting. Inside a form field, Ctrl+C copies the field's own text as you'd expect.
+- **Answer fields** — a control carrying `data-answer="<id>"` (a `textarea`, text `input`, checkbox or `select`) writes its value straight back into the `.md` as you type. There's nothing to save. Prose is never rewritten, an ambiguous id is refused rather than guessed at, the write is atomic, and a file with no `data-answer` in it has no write path at all.
+- **Runnable links** — a link to a script or program runs it. Because that's code execution from a document, executable targets (`.cmd`, `.exe`, `.ps1` and friends) ask first; approving remembers the containing *folder*, so a set of related commands is one decision rather than one per link. Images, PDFs and http links open as they always did, with no prompt. Approvals live in `%AppData%\emMDee\trusted-commands.json` — delete it to forget them all.
+- **Form controls are themed** — raw HTML inputs in a document follow the page's light/dark palette instead of rendering as a white box in a dark page.
 - **System‑aware theming** — follows your Windows light/dark preference automatically. The title bar, menus, and chrome all adapt.
 - **Graceful fallback** — if WebView2 Runtime isn't installed (rare on Windows 11, possible on older Windows 10), the app shows a clear banner with a download link instead of crashing.
 
@@ -110,7 +115,7 @@ emMDee.sln
 
 ## Known limitations
 
-- **View‑only.** There's no editor pane. emMDee is a previewer, not an IDE.
+- **View‑only, with one exception.** There's no editor pane; emMDee is a previewer, not an IDE. Only controls a document explicitly marks with `data-answer` can write, and only their own values.
 - **Copy granularity.** Ctrl+Shift+C extracts Markdown at block level. For short inline selections the result may include the whole paragraph — that's by design; the source mapping works on token boundaries.
 - **WebView2 prerequisite.** The runtime is bundled with Windows 11. On Windows 10 it's usually present, but if it's missing the app will show a download link.
 - **File extensions.** Only `.md`, `.markdown`, `.mdown`, and `.mkd` are recognised in the open dialog. You can drag anything onto the window, though.

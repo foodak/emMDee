@@ -10,6 +10,9 @@
     --code-bg: #f4f4f4;
     --border: #e0e0e0;
     --quote: #666;
+    --field-bg: #ffffff;
+    --field-border: #b9b9b9;
+    --accent: #4a9eff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -18,6 +21,9 @@
       --code-bg: #2d2d2d;
       --border: #444;
       --quote: #999;
+      --field-bg: #2a2a2a;
+      --field-border: #5a5a5a;
+      --accent: #4a9eff;
     }
   }
   body {
@@ -83,6 +89,51 @@
   a:hover { text-decoration: underline; }
   hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
   ul, ol { padding-left: 24px; }
+
+  /* Raw HTML embedded in a .md renders with browser-default chrome, which is a
+     white box with black text in dark mode. Theme it from the same tokens the
+     rest of the document uses so both schemes follow automatically. */
+  input, textarea, select, button {
+    font-family: inherit;
+    font-size: 1em;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--field-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  textarea {
+    display: block;
+    width: 100%;
+    line-height: 1.5;
+    resize: vertical;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.28);
+  }
+  input::placeholder, textarea::placeholder { color: var(--quote); }
+  button { cursor: pointer; background: var(--code-bg); }
+  button:hover { border-color: var(--accent); }
+  input[type="checkbox"], input[type="radio"] {
+    width: auto;
+    padding: 0;
+    accent-color: var(--accent);
+  }
+  /* GFM task lists: marked emits a disabled checkbox in an li. */
+  li > input[type="checkbox"] { margin-right: 6px; }
+  li:has(> input[type="checkbox"]) { list-style: none; margin-left: -20px; }
+  fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+  /* A control that opts into being saved back to the file. The left bar is the
+     only affordance: filling while unsaved, solid accent once the host has
+     written it, so "did that stick?" is answered without a dialog. */
+  [data-answer] { border-left: 3px solid var(--field-border); }
+  [data-answer].answer-saved { border-left-color: var(--accent); }
+  input[type="checkbox"][data-answer], input[type="radio"][data-answer] { border-left: none; }
+  legend { padding: 0 6px; color: var(--quote); }
 
   .search-highlight {
     background-color: #FFEB3B;
@@ -521,10 +572,109 @@
   // (which bakes in dark-mode colours and ends up white-on-dark in Word).
   // No-selection Ctrl+C falls through to buildCopyPayload's whole-document branch.
   document.addEventListener('copy', function(e) {
+    // ...but NEVER when the selection is inside a form field. This handler
+    // replaces whatever was selected with the whole document's payload, which
+    // inside a textarea means the answer you highlighted is not what you get -
+    // and with nothing selected in the document, not even close. Let the browser
+    // do its ordinary thing for fields; the override is for reading the article.
+    if (isEditableTarget(e.target) || isEditableTarget(document.activeElement)) return;
+
     var payload = buildCopyPayload();
     e.clipboardData.setData('text/html', payload.html);
     e.clipboardData.setData('text/plain', payload.text);
     e.preventDefault();
+  });
+
+  function isEditableTarget(el) {
+    if (!el || !el.tagName) return false;
+    var tag = el.tagName.toLowerCase();
+    return tag === 'textarea' || tag === 'input' || tag === 'select' || el.isContentEditable === true;
+  }
+
+  // --- Answer fields -----------------------------------------------------
+  // emMDee is a viewer, with one deliberate exception: a form control that opts in
+  // by carrying data-answer="<id>" has its value written back into the source .md.
+  // That is what lets a generated review document hold its own answers, so the
+  // question and the box you type it in live in one file. Controls WITHOUT the
+  // attribute stay exactly as they are today — rendered, typeable, never saved.
+  var ANSWER_DEBOUNCE_MS = 400;
+  var _answerTimers = {};
+
+  function answerKind(el) {
+    var tag = el.tagName.toLowerCase();
+    if (tag === 'textarea') return 'textarea';
+    if (tag === 'select') return 'select';
+    if (tag === 'input') {
+      var type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (type === 'checkbox') return 'checkbox';
+      if (type === 'text' || type === 'search' || type === 'email' || type === 'url' ||
+          type === 'number' || type === 'date' || type === 'time') return 'text';
+    }
+    return null;
+  }
+
+  function answerValue(el, kind) {
+    if (kind === 'checkbox') return el.checked ? 'true' : 'false';
+    return el.value;
+  }
+
+  function postAnswer(el) {
+    var id = el.getAttribute('data-answer');
+    var kind = answerKind(el);
+    if (!id || !kind) return;
+    if (!(window.chrome && window.chrome.webview)) return;
+    window.chrome.webview.postMessage({
+      type: 'answer-field',
+      id: id,
+      kind: kind,
+      value: answerValue(el, kind)
+    });
+    el.setAttribute('data-answer-saved', '1');
+    el.classList.add('answer-saved');
+  }
+
+  function scheduleAnswer(el) {
+    var id = el.getAttribute('data-answer');
+    if (!id) return;
+    el.classList.remove('answer-saved');
+    if (_answerTimers[id]) clearTimeout(_answerTimers[id]);
+    // Typing is debounced so a sentence is one write, not one per keystroke.
+    _answerTimers[id] = setTimeout(function () {
+      delete _answerTimers[id];
+      postAnswer(el);
+    }, ANSWER_DEBOUNCE_MS);
+  }
+
+  function flushAnswer(el) {
+    var id = el.getAttribute('data-answer');
+    if (id && _answerTimers[id]) {
+      clearTimeout(_answerTimers[id]);
+      delete _answerTimers[id];
+    }
+    postAnswer(el);
+  }
+
+  // Delegated, so it survives every re-render without re-binding.
+  document.addEventListener('input', function (e) {
+    var el = e.target;
+    if (el && el.hasAttribute && el.hasAttribute('data-answer')) scheduleAnswer(el);
+  });
+  document.addEventListener('change', function (e) {
+    var el = e.target;
+    // change fires on commit for checkboxes and selects; write those immediately.
+    if (el && el.hasAttribute && el.hasAttribute('data-answer')) flushAnswer(el);
+  });
+  document.addEventListener('focusout', function (e) {
+    var el = e.target;
+    // Leaving the field must not lose a debounce still in flight.
+    if (el && el.hasAttribute && el.hasAttribute('data-answer') &&
+        _answerTimers[el.getAttribute('data-answer')]) flushAnswer(el);
+  });
+  window.addEventListener('beforeunload', function () {
+    Object.keys(_answerTimers).forEach(function (id) {
+      var el = document.querySelector('[data-answer="' + id + '"]');
+      if (el) flushAnswer(el);
+    });
   });
 
   // Expose renderMarkdown globally (called from C# via ExecuteScriptAsync)

@@ -236,6 +236,62 @@ public class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Writes one opted-in form control's value back into the active tab's file.
+    ///
+    /// This is the viewer's only write path, and it is deliberately narrow: the page raises
+    /// this exclusively for a control carrying <c>data-answer="&lt;id&gt;"</c>, and
+    /// <see cref="AnswerFieldService"/> rewrites that control's value and nothing else,
+    /// refusing outright when the id is missing or ambiguous. Prose is never touched, and a
+    /// markdown file containing no such attribute can never reach this code.
+    ///
+    /// After a successful write the tab is re-snapshotted so our own change does not come
+    /// back through the file watcher as "changed on disk" — the notification bar is for other
+    /// people's edits.
+    /// </summary>
+    public void ApplyAnswerField(string id, string kind, string value)
+    {
+        var tab = ActiveTab;
+        if (tab == null || string.IsNullOrEmpty(tab.FilePath) || !File.Exists(tab.FilePath))
+            return;
+
+        string current;
+        try
+        {
+            // Read from disk rather than trusting the in-memory copy: it is the thing being
+            // rewritten, and re-reading keeps a concurrent external edit from being clobbered
+            // by a stale snapshot.
+            current = File.ReadAllText(tab.FilePath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"ApplyAnswerField read failed: {ex.Message}");
+            return;
+        }
+
+        var result = AnswerFieldService.Apply(current, id, kind, value);
+        if (!result.Applied || result.Markdown == null)
+        {
+            System.Diagnostics.Debug.WriteLine($"ApplyAnswerField refused: {result.Reason}");
+            return;
+        }
+
+        if (!AnswerFieldService.Save(tab.FilePath, result.Markdown, out var reason))
+        {
+            System.Diagnostics.Debug.WriteLine($"ApplyAnswerField save failed: {reason}");
+            return;
+        }
+
+        tab.MarkdownContent = result.Markdown;
+        tab.SnapshotFileInfo();
+        if (tab.ExternalState == ExternalChangeState.Modified)
+        {
+            tab.ExternalState = ExternalChangeState.None;
+            if (ReferenceEquals(tab, ActiveTab))
+                RefreshFileNotification();
+        }
+    }
+
+    /// <summary>
     /// Dismisses the notification for the active tab ("keep my view"). For a modified file we
     /// re-snapshot so only the *next* change re-notifies; for a deleted file we simply clear it.
     /// </summary>
