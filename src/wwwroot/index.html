@@ -171,7 +171,7 @@
   // raw markdown corresponding to a DOM selection.
   var _sourceRanges = [];   // [{el: DOM element, start: number, end: number}]
 
-  function renderMarkdown(md, baseUrl, scrollY) {
+  function renderMarkdown(md, images, baseUrl, scrollY) {
     // Reset source range tracking
     _sourceRanges = [];
     rawMarkdown = md;
@@ -180,20 +180,30 @@
     // render helper can restore it after images finish loading.
     _pendingScrollY = (typeof scrollY === 'number') ? scrollY : null;
 
+    var tokens = null;
     var html;
     if (typeof marked !== 'undefined') {
-      // Tokenize to get source positions, then render with position
-      // annotations so each block-level element knows its origin.
-      var tokens = marked.lexer(md);
-      var pos = 0;
-      for (var i = 0; i < tokens.length; i++) {
-        tokens[i]._mdStart = pos;
-        if (typeof tokens[i].raw === 'string') {
-          pos += tokens[i].raw.length;
+      try {
+        // Tokenize to get source positions, then render with position
+        // annotations so each block-level element knows its origin.
+        tokens = marked.lexer(md);
+        var pos = 0;
+        for (var i = 0; i < tokens.length; i++) {
+          tokens[i]._mdStart = pos;
+          if (typeof tokens[i].raw === 'string') {
+            pos += tokens[i].raw.length;
+          }
+          tokens[i]._mdEnd = pos;
         }
-        tokens[i]._mdEnd = pos;
+        html = marked.parser(tokens);
+      } catch (e) {
+        // Never leave the placeholder showing: if the parser chokes, say so
+        // and fall back to the raw source instead of failing silently.
+        var safe = String(md).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        html = '<p><em>Could not render this file (' +
+               String(e && e.message ? e.message : e) + '). Showing raw text:</em></p>' +
+               '<pre>' + safe.substring(0, 100000) + '</pre>';
       }
-      html = marked.parser(tokens);
     } else {
       html = '<pre>' + escapeHtml(md) + '</pre>';
     }
@@ -201,10 +211,20 @@
     var content = document.getElementById('content');
     content.innerHTML = html;
 
+    // Inlined local images travel out-of-band in `images`, keyed to the
+    // emmdee-img://N placeholders left in the markdown, so the parser never
+    // has to chew megabyte-long data: lines (which overflow its regex stack).
+    if (images) {
+      content.querySelectorAll('img[src^="emmdee-img:"]').forEach(function(img) {
+        var data = images[img.getAttribute('src').slice('emmdee-img://'.length)];
+        if (data) img.src = data;
+      });
+    }
+
     // Walk block-level children and assign source-range data attributes.
     // We re-tokenize to find corresponding spans in the raw markdown
     // for each rendered DOM block.
-    _annotateSourceRanges(content, tokens, md);
+    if (tokens) _annotateSourceRanges(content, tokens, md);
 
     if (baseUrl) {
       content.querySelectorAll('img').forEach(function(img) {
@@ -680,9 +700,9 @@
   // Expose renderMarkdown globally (called from C# via ExecuteScriptAsync)
   // Save the internal render function before replacing the global name
   var _renderMarkdown = renderMarkdown;
-  window.renderMarkdown = function(md, baseUrl, scrollY) {
+  window.renderMarkdown = function(md, images, baseUrl, scrollY) {
     setRawMarkdown(md);
-    _renderMarkdown(md, baseUrl, scrollY);
+    _renderMarkdown(md, images, baseUrl, scrollY);
   };
 
   // Expose for C# to retrieve selected markdown

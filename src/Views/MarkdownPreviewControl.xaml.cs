@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -318,16 +319,8 @@ public partial class MarkdownPreviewControl : UserControl
         _lastRenderedMarkdown = markdown;
         _lastRenderedFilePath = filePath;
 
-        var inlined = InlineLocalImages(markdown, filePath);
-        var escaped = inlined
-            .Replace("\\", "\\\\")
-            .Replace("`", "\\`")
-            .Replace("$", "\\$");
-
-        var baseUrlJson = BuildBaseUrlJson(filePath);
-        var posStr = scrollPosition.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var script = $"renderMarkdown(`{escaped}`, {baseUrlJson}, {posStr});";
-        WebView.CoreWebView2.ExecuteScriptAsync(script);
+        WebView.CoreWebView2.ExecuteScriptAsync(
+            BuildRenderScript(markdown, scrollPosition, filePath));
     }
 
     public void SearchInPreview(string searchText, bool forward = true)
@@ -377,19 +370,37 @@ public partial class MarkdownPreviewControl : UserControl
         _lastRenderedMarkdown = markdown;
         _lastRenderedFilePath = filePath;
 
-        var inlined = InlineLocalImages(markdown, filePath);
+        await WebView.CoreWebView2.ExecuteScriptAsync(
+            BuildRenderScript(markdown, scrollPosition, filePath));
+    }
+
+    /// <summary>
+    /// Builds the renderMarkdown(...) call for the preview page. Inlined images
+    /// ride in a separate JSON argument rather than inside the markdown itself —
+    /// marked's lexer dies with a regex stack overflow on multi-megabyte base64
+    /// lines, so the markdown only ever sees short emmdee-img://N placeholders.
+    /// </summary>
+    private static string BuildRenderScript(string markdown, double scrollPosition, string? filePath)
+    {
+        var registry = new Dictionary<string, string>();
+        var inlined = InlineLocalImages(markdown, filePath, registry);
         var escaped = inlined
             .Replace("\\", "\\\\")
             .Replace("`", "\\`")
             .Replace("$", "\\$");
 
+        var imagesJson = registry.Count > 0 ? JsonSerializer.Serialize(registry) : "null";
         var baseUrlJson = BuildBaseUrlJson(filePath);
         var posStr = scrollPosition.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        await WebView.CoreWebView2.ExecuteScriptAsync($"renderMarkdown(`{escaped}`, {baseUrlJson}, {posStr});");
+        return $"renderMarkdown(`{escaped}`, {imagesJson}, {baseUrlJson}, {posStr});";
     }
 
-    // Replaces relative image references in markdown with data: URIs so that
-    // WebView2's cross-directory file:// restriction never blocks them.
+    // Replaces relative image references in markdown with short emmdee-img://N
+    // placeholders, adding each image's data: URI to <paramref name="registry"/>.
+    // The data URIs used to be embedded straight into the markdown, but a run of
+    // multi-megabyte base64 lines makes marked's lexer blow the regex stack — so
+    // they now travel beside the markdown (see BuildRenderScript) and the page
+    // swaps them back in after parsing.
     // Matches ![alt text](path) — path allows spaces, parentheses, and most
     // common filename characters (parentheses nested one level deep).
     private static readonly Regex _imgRegex =
@@ -407,7 +418,8 @@ public partial class MarkdownPreviewControl : UserControl
         { ".ico",  "image/x-icon"  },
     };
 
-    private static string InlineLocalImages(string markdown, string? filePath)
+    private static string InlineLocalImages(string markdown, string? filePath,
+        Dictionary<string, string> registry)
     {
         if (string.IsNullOrEmpty(filePath)) return markdown;
         var dir = Path.GetDirectoryName(filePath);
@@ -438,7 +450,9 @@ public partial class MarkdownPreviewControl : UserControl
             try
             {
                 var b64 = Convert.ToBase64String(File.ReadAllBytes(full));
-                return $"![{alt}](data:{mime};base64,{b64})";
+                var key = registry.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                registry[key] = $"data:{mime};base64,{b64}";
+                return $"![{alt}](emmdee-img://{key})";
             }
             catch
             {
