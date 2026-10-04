@@ -8,14 +8,18 @@ namespace emMDee.Views;
 /// Asks once before a document's link executes something.
 ///
 /// Two outcomes only — run, or do not — plus a checkbox that records the answer
-/// so the same file does not ask again. The default button is Run and Escape
-/// cancels, because the owner clicked the link deliberately; the dialog exists
-/// so that a document they did NOT write cannot execute code silently, not to
-/// argue with them about a command they asked for.
+/// so the same program does not ask again. When the command is a script that
+/// provably only launches another program, the dialog says which program that
+/// is and the checkbox remembers THAT program instead of the script, so a
+/// workflow that writes a fresh wrapper script per document asks once and then
+/// never again. The default button is Run and Escape cancels, because the
+/// owner clicked the link deliberately; the dialog exists so that a document
+/// they did NOT write cannot execute code silently, not to argue with them
+/// about a command they asked for.
 /// </summary>
 public partial class RunCommandDialog : Window
 {
-    /// <summary>True when the owner ticked "don't ask again for this folder".</summary>
+    /// <summary>True when the owner ticked "don't ask again".</summary>
     public bool Remember => RememberBox.IsChecked == true;
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -23,20 +27,43 @@ public partial class RunCommandDialog : Window
 
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
-    public RunCommandDialog(string commandPath)
+    public RunCommandDialog(string commandPath, Services.ResolvedForwarder? forwarder)
     {
         InitializeComponent();
         PathText.Text = commandPath;
 
-        // Name the folder the tick would approve. A review request holds several
-        // commands that all launch the same program, so approving the folder is
-        // one decision instead of one per link - but it also covers commands
-        // added to that folder later, and the reader should be told which folder
-        // that is rather than left to infer it.
-        var folder = Services.TrustedCommandService.FolderOf(commandPath);
-        RememberText.Text = folder is null
-            ? "Don't ask again for this file"
-            : $"Don't ask again for commands in {DescribeFolder(folder)}";
+        var targets = forwarder?.InvokedExecutables
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
+
+        // When the script is a proven forwarder, name the program it launches:
+        // that is the thing running when the owner clicks Run, and it is what
+        // "don't ask again" remembers.
+        if (targets.Count > 0)
+        {
+            LaunchText.Text = targets.Count == 1
+                ? $"This command just launches: {targets[0]}"
+                : "This command only launches:" + Environment.NewLine
+                    + string.Join(Environment.NewLine, targets);
+            LaunchText.Visibility = Visibility.Visible;
+        }
+
+        if (targets.Count == 1)
+        {
+            RememberText.Text = "Don't ask again for that program";
+        }
+        else
+        {
+            // Name the folder the tick would approve. A review request holds
+            // several commands that all launch the same program, so approving
+            // the folder is one decision instead of one per link - but it also
+            // covers commands added to that folder later, and the reader should
+            // be told which folder that is rather than left to infer it.
+            var folder = Services.TrustedCommandService.FolderOf(commandPath);
+            RememberText.Text = folder is null
+                ? "Don't ask again for this file"
+                : $"Don't ask again for commands in {DescribeFolder(folder)}";
+        }
 
         // Stated in code as well as in the XAML: the remembered-trust box starts
         // CLEAR. A prompt that arrives pre-ticked turns "ask once" into "never ask
@@ -145,6 +172,10 @@ public partial class RunCommandDialog : Window
     /// Shows the prompt for <paramref name="commandPath"/> unless it is already
     /// trusted, and records the approval when asked to. Returns true when the
     /// caller may launch it.
+    ///
+    /// "Don't ask again" records the PROGRAM the command launches when the
+    /// command is a proven wrapper, and falls back to the folder (or the one
+    /// file) it always recorded otherwise.
     /// </summary>
     public static bool Confirm(Window? owner, Services.TrustedCommandService trust, string commandPath)
     {
@@ -153,7 +184,12 @@ public partial class RunCommandDialog : Window
         if (trust.IsTrusted(commandPath))
             return true;
 
-        var dialog = new RunCommandDialog(commandPath);
+        var forwarder = Services.CommandScriptResolver.TryResolve(commandPath);
+        var targets = forwarder?.InvokedExecutables
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
+
+        var dialog = new RunCommandDialog(commandPath, forwarder);
         if (owner is not null && owner.IsLoaded)
         {
             dialog.Owner = owner;
@@ -169,12 +205,26 @@ public partial class RunCommandDialog : Window
         var approved = dialog.ShowDialog() == true;
         if (approved && dialog.Remember)
         {
-            // Folder scope, because that is what the checkbox promised. Falls back
-            // to the single file when the path has no readable folder.
-            if (Services.TrustedCommandService.FolderOf(commandPath) is not null)
+            if (targets.Count == 1)
+            {
+                // Approve the program the wrapper launches, not the wrapper: a
+                // review workflow writes a new wrapper per document, but the
+                // program behind it is the same one every time. The approval
+                // also records the wrapper's environment variables, so a later
+                // wrapper cannot smuggle new ones past this decision.
+                trust.Trust(targets[0], forwarder!.EnvVarsSet);
+            }
+            else if (Services.TrustedCommandService.FolderOf(commandPath) is not null)
+            {
+                // Folder scope, because that is what the checkbox promised.
+                // Falls back to the single file when the path has no readable
+                // folder.
                 trust.TrustFolder(commandPath);
+            }
             else
+            {
                 trust.Trust(commandPath);
+            }
         }
         return approved;
     }

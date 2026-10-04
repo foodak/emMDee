@@ -24,7 +24,16 @@ namespace emMDee.Services;
 ///
 /// A FILE approval additionally pins content: the record holds a SHA-256 of the
 /// script as approved, so editing it, or dropping a different script at the same
-/// path, asks again.
+/// path, asks again. A file approval also pins which environment variables a
+/// wrapper may set for the program (see <see cref="Approval.EnvVars"/>).
+///
+/// A .cmd/.bat that provably does nothing but LAUNCH other programs is covered
+/// by THEIR approvals instead of its own: <see cref="CommandScriptResolver"/>
+/// reads the wrapper, and when every program it launches is already approved,
+/// the wrapper runs without asking. A review workflow that writes a fresh
+/// wrapper per document — same program, new folder, new arguments — therefore
+/// asks once for the program itself and then never again, while a wrapper the
+/// resolver cannot prove stays as it always was and asks on its own.
 ///
 /// Stored beside the session as `%AppData%/emMDee/trusted-commands.json`, in its
 /// own file so a session save can never drop it and so the owner can delete every
@@ -53,18 +62,39 @@ public sealed class TrustedCommandService
         /// <summary>"folder" or "file". Absent in records written before folders existed.</summary>
         public string Kind { get; set; } = "file";
 
+        /// <summary>
+        /// For a file approval: the environment variables a wrapper may set for
+        /// this program and still count as "the command you approved". Null in
+        /// folder approvals and in records written before wrappers existed, and
+        /// treated as an empty set — a wrapper that sets anything asks again
+        /// once, and the new answer records its variables.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? EnvVars { get; set; }
+
         public DateTime ApprovedUtc { get; set; }
     }
 
     private readonly string _storePath;
     private readonly Dictionary<string, Approval> _approvals = new(StringComparer.OrdinalIgnoreCase);
 
-    public TrustedCommandService()
+    public TrustedCommandService(string? storePath = null)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var appDir = Path.Combine(appData, "emMDee");
-        Directory.CreateDirectory(appDir);
-        _storePath = Path.Combine(appDir, "trusted-commands.json");
+        if (storePath is null)
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var appDir = Path.Combine(appData, "emMDee");
+            Directory.CreateDirectory(appDir);
+            _storePath = Path.Combine(appDir, "trusted-commands.json");
+        }
+        else
+        {
+            // Tests point the store at a temp file; the app never does.
+            _storePath = storePath;
+            var dir = Path.GetDirectoryName(storePath);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+        }
         Load();
     }
 
@@ -83,8 +113,9 @@ public sealed class TrustedCommandService
 
     /// <summary>
     /// True when this command may run without asking — because the folder it
-    /// lives in was approved, or because this exact file with exactly this
-    /// content was.
+    /// lives in was approved, because this exact file with exactly this content
+    /// was, or because it is a wrapper that provably only launches programs
+    /// that were.
     /// </summary>
     public bool IsTrusted(string path)
     {
@@ -99,9 +130,66 @@ public sealed class TrustedCommandService
             return true;
         }
 
-        if (!_approvals.TryGetValue(full, out var approval) || approval.Kind == "folder")
+        if (_approvals.TryGetValue(full, out var approval)
+            && approval.Kind == "file"
+            && DigestMatches(full, approval))
+        {
+            return true;
+        }
+
+        // A wrapper that provably only launches other programs inherits THEIR
+        // approval. One level deep on purpose: the remembered unit is the
+        // program the owner actually approved, and nothing the resolver cannot
+        // prove is ever covered by this path.
+        if (CommandScriptResolver.TryResolve(full) is ResolvedForwarder forwarder)
+        {
+            var targets = forwarder.InvokedExecutables
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return targets.Count > 0 && targets.All(t => IsApprovedTarget(t, forwarder.EnvVarsSet));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when a program a wrapper launches is approved to run with the
+    /// environment the wrapper prepares for it.
+    ///
+    /// A folder approval covers the program no matter what the wrapper says
+    /// first — that is the broad trust the folder option was sold as. A file
+    /// approval only covers it when the wrapper sets no variable beyond the
+    /// ones recorded with the approval, so a later wrapper cannot smuggle new
+    /// environment into a remembered decision.
+    /// </summary>
+    private bool IsApprovedTarget(string target, IReadOnlySet<string> envVarsSet)
+    {
+        var full = FullPath(target);
+        if (full is null)
             return false;
 
+        if (FolderOf(full) is string folder
+            && _approvals.TryGetValue(folder, out var folderApproval)
+            && folderApproval.Kind == "folder")
+        {
+            return true;
+        }
+
+        if (!_approvals.TryGetValue(full, out var approval)
+            || approval.Kind != "file"
+            || !DigestMatches(full, approval))
+        {
+            return false;
+        }
+
+        var allowed = approval.EnvVars is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(approval.EnvVars, StringComparer.OrdinalIgnoreCase);
+        return envVarsSet.IsSubsetOf(allowed);
+    }
+
+    private static bool DigestMatches(string full, Approval approval)
+    {
         var digest = Digest(full);
         return digest is not null && string.Equals(digest, approval.Sha256, StringComparison.Ordinal);
     }
@@ -143,7 +231,15 @@ public sealed class TrustedCommandService
     }
 
     /// <summary>Remember this one file, as it is right now, as approved to run.</summary>
-    public void Trust(string path)
+    public void Trust(string path) => Trust(path, null);
+
+    /// <summary>
+    /// Remember this one file, as it is right now, as approved to run, plus
+    /// the environment variables a wrapper may set for it (the wrapper's own
+    /// assignments at approval time). Pass null when the file itself was
+    /// approved directly rather than through a wrapper.
+    /// </summary>
+    public void Trust(string path, IReadOnlySet<string>? envVars)
     {
         var full = FullPath(path);
         var digest = full is null ? null : Digest(full);
@@ -156,6 +252,9 @@ public sealed class TrustedCommandService
             Sha256 = digest,
             Kind = "file",
             ApprovedUtc = DateTime.UtcNow,
+            EnvVars = envVars is null || envVars.Count == 0
+                ? null
+                : envVars.OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList(),
         };
         Save();
     }

@@ -38,11 +38,21 @@
                 Background="{DynamicResource ContentBackground}"
                 BorderBrush="{DynamicResource ChromeBorderBrush}"
                 BorderThickness="1">
-            <TextBlock x:Name="PathText"
-                       FontFamily="Consolas, Cascadia Mono, monospace"
-                       FontSize="12"
-                       TextWrapping="Wrap"
-                       Foreground="{DynamicResource ChromeForeground}"/>
+            <StackPanel>
+                <TextBlock x:Name="PathText"
+                           FontFamily="Consolas, Cascadia Mono, monospace"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource ChromeForeground}"/>
+                <TextBlock x:Name="LaunchText"
+                           Margin="0,6,0,0"
+                           FontFamily="Consolas, Cascadia Mono, monospace"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Opacity="0.85"
+                           Foreground="{DynamicResource ChromeForeground}"
+                           Visibility="Collapsed"/>
+            </StackPanel>
         </Border>
 
         <CheckBox x:Name="RememberBox"

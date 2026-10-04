@@ -579,7 +579,9 @@ public partial class MarkdownPreviewControl : UserControl
     /// the page posted) funnel through here so the guard cannot be bypassed by
     /// whichever route a given anchor happens to take. A .png, .pdf or https://
     /// target is unaffected; a .cmd, .exe or .ps1 prompts once and remembers the
-    /// answer against the file's content.
+    /// answer against the file's content — or, when the command is a script that
+    /// provably only launches another program, against the program it launches,
+    /// so a fresh wrapper for an already-approved program does not ask again.
     /// </summary>
     private void LaunchLinkTarget(string target)
     {
