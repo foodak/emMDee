@@ -199,6 +199,9 @@ foreach ($rid in $rids) {
             '-r', $rid,
             '--self-contained', 'true',
             '-p:PublishSingleFile=true',
+            # Stamp the tag into the binary so its built-in update check compares
+            # against the version it actually is, not whatever the project file says.
+            "-p:Version=$Tag",
             '-o', $publishDir
         )
         if ($DryRun) {

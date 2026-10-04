@@ -17,6 +17,7 @@ public class MainViewModel : ObservableObject, IDisposable
 
     private readonly SessionManager _sessionManager;
     private readonly FileWatchService _watchService;
+    private readonly UpdateCheckService _updateCheckService = new();
 
     public ObservableCollection<Models.TabItem> Tabs { get; } = new();
 
@@ -88,6 +89,82 @@ public class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(FileNotificationMessage));
     }
 
+    // --- Update-available banner -----------------------------------------
+
+    private bool _isUpdateAvailable;
+    public bool IsUpdateAvailable
+    {
+        get => _isUpdateAvailable;
+        private set => SetProperty(ref _isUpdateAvailable, value);
+    }
+
+    private string _updateBannerMessage = string.Empty;
+    public string UpdateBannerMessage
+    {
+        get => _updateBannerMessage;
+        private set => SetProperty(ref _updateBannerMessage, value);
+    }
+
+    private string _updateReleaseUrl = string.Empty;
+    public string UpdateReleaseUrl
+    {
+        get => _updateReleaseUrl;
+        private set => SetProperty(ref _updateReleaseUrl, value);
+    }
+
+    private ReleaseInfo? _pendingRelease;
+
+    /// <summary>
+    /// Asks GitHub whether a newer release exists. Runs silently when
+    /// <paramref name="force"/> is false (the startup path): the user only ever
+    /// hears about a genuinely newer version, never about a failed or throttled
+    /// check. A forced check reports its outcome, because the user asked for it.
+    /// </summary>
+    public async Task CheckForUpdatesAsync(bool force)
+    {
+        var result = await _updateCheckService.CheckForUpdateAsync(AppVersion.Current, force);
+
+        switch (result.Outcome)
+        {
+            case UpdateCheckOutcome.UpdateAvailable when result.Release is { } release:
+                _pendingRelease = release;
+                UpdateReleaseUrl = release.ReleaseUrl;
+                UpdateBannerMessage = $"A new version of emMDee is available ({release.TagName}).";
+                IsUpdateAvailable = true;
+
+                if (force)
+                    ShowMessageAction?.Invoke("Check for Updates",
+                        $"emMDee {release.TagName} is available — you have {AppVersion.Current}.\n\n" +
+                        "Use the banner to open the release page.");
+                break;
+
+            case UpdateCheckOutcome.UpToDate when force:
+                ShowMessageAction?.Invoke("Check for Updates",
+                    $"You're up to date — emMDee {AppVersion.Current} is the latest version.");
+                break;
+
+            case UpdateCheckOutcome.Failed when force:
+                ShowMessageAction?.Invoke("Check for Updates",
+                    "Could not check for updates right now.\n\n" +
+                    "Check your internet connection and try again.");
+                break;
+        }
+    }
+
+    private void OpenReleasePage()
+    {
+        if (UpdateReleaseUrl.Length > 0)
+            OpenExternalUrlAction?.Invoke(UpdateReleaseUrl);
+    }
+
+    private void DismissUpdate()
+    {
+        if (_pendingRelease != null)
+            _updateCheckService.Dismiss(_pendingRelease);
+
+        IsUpdateAvailable = false;
+    }
+
     /// <summary>Raised when the user clicks Reload — the view reloads + re-renders the active tab.</summary>
     public Action? ReloadActiveTabRequested;
 
@@ -111,6 +188,9 @@ public class MainViewModel : ObservableObject, IDisposable
     public ICommand DismissFileNotificationCommand { get; }
     public ICommand CloseDeletedTabCommand { get; }
     public ICommand ExitCommand { get; }
+    public ICommand ViewReleaseCommand { get; }
+    public ICommand DismissUpdateCommand { get; }
+    public ICommand CheckForUpdatesCommand { get; }
 
     // Func delegate for searching (returns true if search wrapped around / no matches)
     public Func<string, bool, bool, Task<bool>>? SearchInPreviewFunc;
@@ -119,6 +199,10 @@ public class MainViewModel : ObservableObject, IDisposable
     public Func<Task>? CopyAsRichFunc;
     public Action? CopyAsMarkdownAction;
     public Action? PrintFunc;
+
+    // Wired up by MainWindow: open a URL in the default browser, and show a message box.
+    public Action<string>? OpenExternalUrlAction;
+    public Action<string, string>? ShowMessageAction;
 
     // Events to communicate with the view
     public event Action? SearchDismissed;
@@ -158,6 +242,9 @@ public class MainViewModel : ObservableObject, IDisposable
         DismissFileNotificationCommand = new RelayCommand(_ => DismissFileNotification());
         CloseDeletedTabCommand = new RelayCommand(_ => CloseTab(ActiveTab));
         ExitCommand = new RelayCommand(_ => Application.Current.Shutdown());
+        ViewReleaseCommand = new RelayCommand(_ => OpenReleasePage(), _ => UpdateReleaseUrl.Length > 0);
+        DismissUpdateCommand = new RelayCommand(_ => DismissUpdate(), _ => IsUpdateAvailable);
+        CheckForUpdatesCommand = new RelayCommand(_ => _ = CheckForUpdatesAsync(force: true));
 
         Tabs.CollectionChanged += (_, _) =>
         {

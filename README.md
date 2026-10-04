@@ -35,6 +35,7 @@ Under the hood it uses [marked.js](https://github.com/markedjs/marked) for GitHu
 - **Runnable links** — a link to a script or program runs it. Because that's code execution from a document, executable targets (`.cmd`, `.exe`, `.ps1` and friends) ask first; approving remembers the containing *folder*, so a set of related commands is one decision rather than one per link. When a command is a `.cmd`/`.bat` wrapper that provably does nothing but launch one program, the prompt names that program and "don't ask again" remembers **it** — so a review workflow that writes a fresh wrapper per document (same program, new folder, new arguments) asks once for the program and then never again. If the program's file changes, it asks once more. Images, PDFs and http links open as they always did, with no prompt. Approvals live in `%AppData%\emMDee\trusted-commands.json` — delete it to forget them all.
 - **Form controls are themed** — raw HTML inputs in a document follow the page's light/dark palette instead of rendering as a white box in a dark page.
 - **System‑aware theming** — follows your Windows light/dark preference automatically. The title bar, menus, and chrome all adapt.
+- **Update notice** — once a day, quietly, emMDee asks GitHub whether a newer release exists. If there is one, a slim banner appears above the content with a link to the release page. Nothing pops up, nothing blocks, and an offline or rate‑limited check is invisible. Waving a banner away ("Dismiss") remembers that version; **Help → Check for Updates…** asks on demand.
 - **Graceful fallback** — if WebView2 Runtime isn't installed (rare on Windows 11, possible on older Windows 10), the app shows a clear banner with a download link instead of crashing.
 
 ## Download
@@ -72,6 +73,15 @@ Compress-Archive -Path publish/win-x64/* -DestinationPath emMDee-win-x64.zip
 
 Swap `win-x64` for `win-arm64` to target ARM64 hardware.
 
+### Cutting a release
+
+`PublishRelease.ps1` builds both architectures, zips them and creates the GitHub
+release. It also stamps the tag into the binaries (`-p:Version=<tag>`), which
+matters for the in‑app update notice: a shipped build compares the running
+version against the newest tag, so a release that reports `1.0.0` would keep
+telling users an update is available. Publish with the script rather than by
+hand and this stays correct.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -98,7 +108,9 @@ emMDee.sln
     ├── Models/
     │   ├── TabItem.cs             # Per‑tab state (path, content, scroll pos)
     │   ├── SessionData.cs         # Serialised session DTO
-    │   └── RecentFileItem.cs      # Recent‑file menu model
+    │   ├── RecentFileItem.cs      # Recent‑file menu model
+    │   ├── ReleaseInfo.cs         # A GitHub release, parsed defensively
+    │   └── UpdateCheckState.cs    # Persisted update-check state
     ├── ViewModels/
     │   ├── MainViewModel.cs       # Commands, tab management, search logic
     │   ├── RelayCommand.cs        # Simple ICommand helper
@@ -107,7 +119,10 @@ emMDee.sln
     ├── Views/
     │   └── MarkdownPreviewControl.xaml / .cs   # WebView2 host with fallback UI
     ├── Services/
-    │   └── SessionManager.cs      # Reads/writes session.json
+    │   ├── SessionManager.cs      # Reads/writes session.json
+    │   ├── UpdateCheckService.cs  # GitHub releases/latest + daily throttle
+    │   ├── SemanticVersion.cs     # Numeric "1.0.10 > 1.0.9" comparison
+    │   └── AppVersion.cs          # The running build's stamped version
     └── wwwroot/
         ├── index.html             # Shell page — marked.js glue, search JS, copy handlers
         └── marked.min.js          # marked.js (GFM parser, v15‑ish)

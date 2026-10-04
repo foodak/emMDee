@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly SessionManager _sessionManager;
     private bool _isClosing;
+    private bool _startupUpdateCheckStarted;
     private double _savedZoomFactor;
     private Models.TabItem? _previousActiveTab;
 
@@ -52,6 +54,11 @@ public partial class MainWindow : Window
         _viewModel.CopyAsMarkdownAction = CopyActiveTabAsMarkdown;
         PreviewControl.CopyAsMarkdownRequested += CopyActiveTabAsMarkdown;
 
+        // The view model decides whether there is an update; the window owns the two
+        // side effects it needs — opening a browser, and showing a message box.
+        _viewModel.OpenExternalUrlAction = OpenExternalUrl;
+        _viewModel.ShowMessageAction = ShowInfoMessage;
+
         // Opted-in form controls (data-answer="<id>") write their value back to the file.
         PreviewControl.AnswerFieldChanged += _viewModel.ApplyAnswerField;
 
@@ -79,8 +86,31 @@ public partial class MainWindow : Window
         {
             _viewModel.RestoreSession();
             PreviewControl.SetZoomFactor(_savedZoomFactor);
+
+            // Quiet background check, throttled to once a day. It never blocks the UI
+            // and never reports a failure — only a newer release shows anything.
+            if (!_startupUpdateCheckStarted)
+            {
+                _startupUpdateCheckStarted = true;
+                _ = _viewModel.CheckForUpdatesAsync(force: false);
+            }
         };
     }
+
+    private void OpenExternalUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"OpenExternalUrl failed: {ex.Message}");
+        }
+    }
+
+    private void ShowInfoMessage(string title, string message)
+        => MessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
 
     protected override void OnSourceInitialized(EventArgs e)
     {

@@ -7,7 +7,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>emMDee</AssemblyName>
-    <Version>1.0.0</Version>
+    <!-- Version of the last release. PublishRelease.ps1 overrides this with
+         -p:Version=<tag> so a shipped binary reports the version it was tagged as. -->
+    <Version>1.0.5</Version>
     <Authors>foodak</Authors>
     <Description>A fast, native Markdown viewer for Windows — rendered beautifully with WebView2.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

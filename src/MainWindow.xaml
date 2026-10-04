@@ -72,7 +72,45 @@
                 <MenuItem Header="_Find..." Command="{Binding ToggleSearchCommand}" InputGestureText="Ctrl+F"/>
                 <MenuItem Header="Find in Open _Files..." Command="{Binding FindInAllTabsCommand}" InputGestureText="Ctrl+Shift+F"/>
             </MenuItem>
+            <MenuItem Header="_Help"
+                      Background="{DynamicResource ChromeBackground}"
+                      Foreground="{DynamicResource ChromeForeground}">
+                <MenuItem Header="Check for _Updates..."
+                          Command="{Binding CheckForUpdatesCommand}"
+                          ToolTip="Ask GitHub whether a newer release is available"/>
+            </MenuItem>
         </Menu>
+
+        <!-- Update-available banner. Sits below the menu and above the search bar, so it is
+             visible without interrupting whatever the user is reading. -->
+        <Border DockPanel.Dock="Top"
+                Background="#1B3A5C"
+                BorderBrush="#4A9EFF"
+                BorderThickness="0,0,0,1"
+                Padding="10,6"
+                Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVisibility}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="⬇" VerticalAlignment="Center"
+                           Margin="0,0,8,0" FontSize="14" Foreground="#8CC4FF"/>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding UpdateBannerMessage}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="#E6F0FB"/>
+                <Button Grid.Column="2" Content="View release" Margin="4,0,2,0" Padding="10,2"
+                        Command="{Binding ViewReleaseCommand}"
+                        ToolTip="Open the release page in your browser"/>
+                <Button Grid.Column="3" Content="Dismiss" Margin="2,0,0,0" Padding="10,2"
+                        Command="{Binding DismissUpdateCommand}"
+                        ToolTip="Don't show this version again"/>
+            </Grid>
+        </Border>
 
         <!-- Search bar -->
         <Border x:Name="SearchBar"
