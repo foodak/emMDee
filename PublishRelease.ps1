@@ -39,6 +39,17 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 # ── helpers ──────────────────────────────────────────────────────────
 function header($msg) { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 
+# git and gh report their progress on stderr. In Windows PowerShell 5.1, merging a
+# native command's stderr with 2>&1 while $ErrorActionPreference is 'Stop' turns the
+# first line of that progress into a terminating NativeCommandError — so "git fetch"
+# died the moment it had a new tag to announce, before anything was built. Run those
+# calls with the preference relaxed, and let the caller inspect the exit code.
+function Invoke-Native([scriptblock]$Command) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Command 2>&1 } finally { $ErrorActionPreference = $previous }
+}
+
 # ── prerequisites ────────────────────────────────────────────────────
 header 'Prerequisites'
 
@@ -113,7 +124,12 @@ header 'Version'
 # gh release create makes the tag on the remote, so the local tag list goes
 # stale after every publish. Sync tags from origin first (prune deleted ones)
 # so "latest existing tag" reflects what's actually been released.
-git fetch --tags --prune --prune-tags origin 2>&1 | Out-Null
+$fetchOutput = Invoke-Native { git fetch --tags --prune --prune-tags origin }
+if ($LASTEXITCODE -ne 0) {
+    $fetchOutput | ForEach-Object { Write-Host $_ }
+    Write-Error 'git fetch failed'
+    exit 1
+}
 
 $allTags = git tag --sort=-v:refname | Where-Object { $_ -match '^v?\d+\.\d+\.\d+$' }
 $latestTag = if ($allTags) { $allTags | Select-Object -First 1 } else { 'v0.0.0' }
@@ -220,10 +236,11 @@ foreach ($rid in $rids) {
 
     # Create zip in publish/
     $zipFile = Join-Path $repoRoot "publish\emMDee-$rid.zip"
-    if (Test-Path $zipFile) { Remove-Item $zipFile -Force }
     if ($DryRun) {
         Write-Host "[DRY RUN] Compress-Archive -Path $publishDir\* -DestinationPath $zipFile" -ForegroundColor DarkGray
     } else {
+        # Only touch the previous zip on a real run — -DryRun promises to change nothing.
+        if (Test-Path $zipFile) { Remove-Item $zipFile -Force }
         Compress-Archive -Path "$publishDir\*" -DestinationPath $zipFile
         Write-Host "Created: $zipFile"
     }
@@ -242,10 +259,13 @@ foreach ($z in $zipFiles) {
 }
 
 if (-not $DryRun) {
-    gh release create $newTag $zipArgs `
-        --title "$newTag" `
-        --notes "$Notes" `
-        --repo foodak/emMDee 2>&1 | Write-Host
+    $releaseOutput = Invoke-Native {
+        gh release create $newTag $zipArgs `
+            --title "$newTag" `
+            --notes "$Notes" `
+            --repo foodak/emMDee
+    }
+    $releaseOutput | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit 1 }
     Write-Host "Release created: $newTag"
 } else {
