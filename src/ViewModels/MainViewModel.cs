@@ -586,9 +586,8 @@ public class MainViewModel : ObservableObject, IDisposable
         var (index, count) = await SearchMatchInfoFunc();
         if (count == 0)
         {
-            SearchStatus = IsFindInAllTabs && Tabs.Count > 1
-                ? $"Can't find \"{searchText}\" in any open file"
-                : $"Can't find \"{searchText}\"";
+            // Never echo the query — a long one would crowd out the search box.
+            SearchStatus = IsFindInAllTabs && Tabs.Count > 1 ? "No matches in open files" : "No matches";
             IsSearchNotFound = true;
         }
         else
