@@ -46,6 +46,7 @@ public partial class App : Application
             res["ScrollTrackBrush"]      = new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x2D));
             res["ScrollThumbBrush"]      = new SolidColorBrush(Color.FromRgb(0x68, 0x68, 0x68));
             res["ScrollThumbHoverBrush"] = new SolidColorBrush(Color.FromRgb(0x9D, 0x9D, 0x9D));
+            res["SearchNotFoundForeground"] = new SolidColorBrush(Color.FromRgb(0xF4, 0x87, 0x71));
 
         }
         else
@@ -59,6 +60,7 @@ public partial class App : Application
             res["ScrollTrackBrush"]      = new SolidColorBrush(Color.FromRgb(0xF0, 0xF0, 0xF0));
             res["ScrollThumbBrush"]      = new SolidColorBrush(Color.FromRgb(0xC0, 0xC0, 0xC0));
             res["ScrollThumbHoverBrush"] = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0));
+            res["SearchNotFoundForeground"] = new SolidColorBrush(Color.FromRgb(0xC4, 0x2B, 0x1C));
 
         }
     }

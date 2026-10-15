@@ -46,7 +46,8 @@ public partial class MainWindow : Window
         _viewModel.SearchInPreviewFunc = OnSearchInPreviewAsync;
         _viewModel.SearchDismissed += OnSearchDismissed;
         _viewModel.SearchFocusRequested += OnSearchFocusRequested;
-        _viewModel.SwitchToNextTabForSearchRequested += OnSwitchToNextTabForSearch;
+        _viewModel.SearchMatchInfoFunc = PreviewControl.GetSearchMatchInfoAsync;
+        _viewModel.SwitchToNextTabForSearchFunc = OnSwitchToNextTabForSearchAsync;
 
         // Wire up copy actions
         _viewModel.CopyAsRichFunc = () => PreviewControl.CopyAsRichAsync();
@@ -219,7 +220,7 @@ public partial class MainWindow : Window
         SearchBox.SelectAll();
     }
 
-    private async void OnSwitchToNextTabForSearch(bool forward)
+    private async Task OnSwitchToNextTabForSearchAsync(bool forward)
     {
         var tabs = _viewModel.Tabs;
         if (tabs.Count <= 1) return;
@@ -257,14 +258,16 @@ public partial class MainWindow : Window
                 return; // found a match — stay on this tab
         }
 
-        // No match anywhere — restore the tab we started from so the user isn't left
-        // on a random no-match tab.
+        // No match in any other tab — restore the tab we started from so the user isn't left
+        // on a random no-match tab, then wrap around within it (its own matches, if any).
         _previousActiveTab = null;
         var startTab = tabs[startIndex];
         _viewModel.ActiveTab = startTab;
         PreviewControl.Visibility = Visibility.Visible;
         await PreviewControl.RenderMarkdownAsync(startTab.MarkdownContent, startTab.ScrollPosition, startTab.FilePath);
         UpdateWelcomeVisibility();
+
+        await PreviewControl.SearchInPreviewAsync(_viewModel.SearchText, forward, fromStart: true);
     }
 
     private async void OnWindowClosing(object? sender, CancelEventArgs e)

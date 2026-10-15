@@ -345,6 +345,23 @@ public partial class MarkdownPreviewControl : UserControl
         return result == "true";
     }
 
+    /// <summary>Current match (0-based, -1 if none) and total match count of the last search.</summary>
+    public async Task<(int Index, int Count)> GetSearchMatchInfoAsync()
+    {
+        if (!_webViewReady) return (-1, 0);
+        try
+        {
+            var result = await WebView.CoreWebView2.ExecuteScriptAsync("searchMatchInfo()");
+            if (JsonSerializer.Deserialize<int[]>(result) is [var index, var count])
+                return (index, count);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"GetSearchMatchInfo error: {ex.Message}");
+        }
+        return (-1, 0);
+    }
+
     public async Task RenderMarkdownAsync(string markdown, double scrollPosition = 0, string? filePath = null)
     {
         if (!_webViewReady)

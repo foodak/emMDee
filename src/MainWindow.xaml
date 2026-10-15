@@ -125,6 +125,7 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="{Binding SearchBarLabel}" VerticalAlignment="Center" Margin="0,0,8,0"
                            Foreground="{DynamicResource ChromeForeground}"/>
@@ -137,17 +138,29 @@
                          CaretBrush="{DynamicResource ChromeForeground}"
                          BorderBrush="{DynamicResource ChromeBorderBrush}"
                          KeyDown="SearchBox_KeyDown"/>
-                <Button Grid.Column="2" Content="▲ Prev" Margin="4,0,2,0" Padding="6,2"
+                <TextBlock Grid.Column="2" Text="{Binding SearchStatus}" VerticalAlignment="Center" Margin="8,0,4,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{DynamicResource ChromeForeground}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSearchNotFound}" Value="True">
+                                    <Setter Property="Foreground" Value="{DynamicResource SearchNotFoundForeground}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <Button Grid.Column="3" Content="▲ Prev" Margin="4,0,2,0" Padding="6,2"
                         Background="{DynamicResource TabBackground}"
                         Foreground="{DynamicResource ChromeForeground}"
                         BorderBrush="{DynamicResource ChromeBorderBrush}"
                         Command="{Binding FindPreviousCommand}"/>
-                <Button Grid.Column="3" Content="Next ▼" Margin="2,0,4,0" Padding="6,2"
+                <Button Grid.Column="4" Content="Next ▼" Margin="2,0,4,0" Padding="6,2"
                         Background="{DynamicResource TabBackground}"
                         Foreground="{DynamicResource ChromeForeground}"
                         BorderBrush="{DynamicResource ChromeBorderBrush}"
                         Command="{Binding FindNextCommand}"/>
-                <Button Grid.Column="4" Content="✕" Margin="6,0,0,0" Padding="6,2"
+                <Button Grid.Column="5" Content="✕" Margin="6,0,0,0" Padding="6,2"
                         Background="Transparent"
                         Foreground="{DynamicResource ChromeForeground}"
                         BorderThickness="0"

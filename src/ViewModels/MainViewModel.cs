@@ -31,6 +31,7 @@ public class MainViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(HasOpenTabs));
                 RefreshFileNotification();
+                ClearSearchStatus(); // a re-render drops the highlights the status described
             }
         }
     }
@@ -39,7 +40,26 @@ public class MainViewModel : ObservableObject, IDisposable
     public string SearchText
     {
         get => _searchText;
-        set => SetProperty(ref _searchText, value);
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+                ClearSearchStatus();
+        }
+    }
+
+    // Result of the last Find Next/Previous, shown beside the search box.
+    private string _searchStatus = string.Empty;
+    public string SearchStatus
+    {
+        get => _searchStatus;
+        private set => SetProperty(ref _searchStatus, value);
+    }
+
+    private bool _isSearchNotFound;
+    public bool IsSearchNotFound
+    {
+        get => _isSearchNotFound;
+        private set => SetProperty(ref _isSearchNotFound, value);
     }
 
     private bool _isSearchVisible;
@@ -195,6 +215,12 @@ public class MainViewModel : ObservableObject, IDisposable
     // Func delegate for searching (returns true if search wrapped around / no matches)
     public Func<string, bool, bool, Task<bool>>? SearchInPreviewFunc;
 
+    // Current match (0-based, -1 if none) and total match count of the last search
+    public Func<Task<(int Index, int Count)>>? SearchMatchInfoFunc;
+
+    // Walks the other tabs (forward or back) until one has a match
+    public Func<bool, Task>? SwitchToNextTabForSearchFunc;
+
     // Func delegates for copy actions, wired up by MainWindow to talk to the preview.
     public Func<Task>? CopyAsRichFunc;
     public Action? CopyAsMarkdownAction;
@@ -207,7 +233,6 @@ public class MainViewModel : ObservableObject, IDisposable
     // Events to communicate with the view
     public event Action? SearchDismissed;
     public event Action? SearchFocusRequested;
-    public event Action<bool>? SwitchToNextTabForSearchRequested;
 
     public MainViewModel(SessionManager sessionManager)
     {
@@ -541,24 +566,42 @@ public class MainViewModel : ObservableObject, IDisposable
         SearchFocusRequested?.Invoke();
     }
 
-    public async void FindNext()
+    public async void FindNext() => await FindAsync(forward: true);
+
+    public async void FindPrevious() => await FindAsync(forward: false);
+
+    private async Task FindAsync(bool forward)
     {
         if (string.IsNullOrEmpty(SearchText) || SearchInPreviewFunc == null) return;
 
-        bool wrapped = await SearchInPreviewFunc(SearchText, true, false);
+        var searchText = SearchText;
+        bool wrapped = await SearchInPreviewFunc(searchText, forward, false);
 
-        if (wrapped && IsFindInAllTabs && Tabs.Count > 1)
-            SwitchToNextTabForSearchRequested?.Invoke(true);
+        if (wrapped && IsFindInAllTabs && Tabs.Count > 1 && SwitchToNextTabForSearchFunc != null)
+            await SwitchToNextTabForSearchFunc(forward);
+
+        // The user typed again while we searched — that edit already cleared the status.
+        if (searchText != SearchText || SearchMatchInfoFunc == null) return;
+
+        var (index, count) = await SearchMatchInfoFunc();
+        if (count == 0)
+        {
+            SearchStatus = IsFindInAllTabs && Tabs.Count > 1
+                ? $"Can't find \"{searchText}\" in any open file"
+                : $"Can't find \"{searchText}\"";
+            IsSearchNotFound = true;
+        }
+        else
+        {
+            SearchStatus = $"{index + 1} of {count}";
+            IsSearchNotFound = false;
+        }
     }
 
-    public async void FindPrevious()
+    private void ClearSearchStatus()
     {
-        if (string.IsNullOrEmpty(SearchText) || SearchInPreviewFunc == null) return;
-
-        bool wrapped = await SearchInPreviewFunc(SearchText, false, false);
-
-        if (wrapped && IsFindInAllTabs && Tabs.Count > 1)
-            SwitchToNextTabForSearchRequested?.Invoke(false);
+        SearchStatus = string.Empty;
+        IsSearchNotFound = false;
     }
 
     public SessionData GetSessionData(double left, double top, double width, double height, bool maximized, double zoomFactor = 1.0)

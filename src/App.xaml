@@ -13,6 +13,7 @@
         <SolidColorBrush x:Key="ScrollTrackBrush"    Color="#F0F0F0"/>
         <SolidColorBrush x:Key="ScrollThumbBrush"    Color="#C0C0C0"/>
         <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#A0A0A0"/>
+        <SolidColorBrush x:Key="SearchNotFoundForeground" Color="#C42B1C"/>
 
         <!-- Custom MenuItem ControlTemplate — replaces the Aero2 template entirely so dark mode has
              no stray white borders, icon-column glyph panels, or system-color references. -->

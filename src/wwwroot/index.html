@@ -420,6 +420,11 @@
     }
   }
 
+  // [current match index (0-based, -1 if none), total matches] for the search bar status
+  function searchMatchInfo() {
+    return [currentMatchIndex, searchMatches.length];
+  }
+
   function clearSearchMarks() {
     // Remove all <mark> elements (search highlights) and restore their text content.
     // Uses DOM manipulation instead of innerHTML replacement to preserve element attributes.
