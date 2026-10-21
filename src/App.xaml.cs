@@ -69,6 +69,11 @@ public partial class App : Application
     {
         var fileArgs = GetFileArgs();
 
+        // Explorer launches us with the opened file's folder as the working directory,
+        // and Windows keeps a handle on that folder for as long as it stays current,
+        // blocking renames/deletes long after the tab is closed. Park it on the exe's folder.
+        Environment.CurrentDirectory = AppContext.BaseDirectory;
+
         // If another instance already holds the mutex, hand our files off to it and quit.
         _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out bool isFirstInstance);
         if (!isFirstInstance)
@@ -99,7 +104,8 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    // Command-line file paths that actually exist on disk (skips arg[0], the exe path).
+    // Command-line file paths that actually exist on disk (skips arg[0], the exe path),
+    // made absolute while the launch working directory is still current.
     private static List<string> GetFileArgs()
     {
         var args = Environment.GetCommandLineArgs();
@@ -107,7 +113,7 @@ public partial class App : Application
         for (int i = 1; i < args.Length; i++)
         {
             if (File.Exists(args[i]))
-                result.Add(args[i]);
+                result.Add(Path.GetFullPath(args[i]));
         }
         return result;
     }

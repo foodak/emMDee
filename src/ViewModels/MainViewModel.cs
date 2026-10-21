@@ -290,7 +290,9 @@ public class MainViewModel : ObservableObject, IDisposable
             {
                 Filter = "Markdown files (*.md)|*.md|All files (*.*)|*.*",
                 Multiselect = true,
-                Title = "Open Markdown File"
+                Title = "Open Markdown File",
+                // Otherwise the dialog makes the chosen folder the working directory, which holds a handle on it.
+                RestoreDirectory = true
             };
 
             if (dialog.ShowDialog() != true)
