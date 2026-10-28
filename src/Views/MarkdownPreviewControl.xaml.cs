@@ -651,16 +651,16 @@ public partial class MarkdownPreviewControl : UserControl
             var items = args.MenuItems;
 
             // Keep the browser's spelling suggestions (shown when right-clicking
-            // a misspelled word in an answer field) before dropping the rest of
-            // the default menu.
-            var spellingItems = items
-                .Where(i => i.Name is "spellCheck" or "addToDictionary")
-                .ToList();
-            items.Clear();
-            if (spellingItems.Count > 0)
+            // a misspelled word in an answer field) and drop the rest of the
+            // default menu. The docs say these are named "spellCheck", but the runtime reports
+            // "spellcheck", so compare without case.
+            for (var i = items.Count - 1; i >= 0; i--)
             {
-                foreach (var item in spellingItems)
-                    items.Add(item);
+                if (!string.Equals(items[i].Name, "spellCheck", StringComparison.OrdinalIgnoreCase))
+                    items.RemoveAt(i);
+            }
+            if (items.Count > 0)
+            {
                 items.Add(env.CreateContextMenuItem(
                     string.Empty, null, CoreWebView2ContextMenuItemKind.Separator));
             }
