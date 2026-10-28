@@ -649,7 +649,21 @@ public partial class MarkdownPreviewControl : UserControl
         {
             var env = WebView.CoreWebView2.Environment;
             var items = args.MenuItems;
+
+            // Keep the browser's spelling suggestions (shown when right-clicking
+            // a misspelled word in an answer field) before dropping the rest of
+            // the default menu.
+            var spellingItems = items
+                .Where(i => i.Name is "spellCheck" or "addToDictionary")
+                .ToList();
             items.Clear();
+            if (spellingItems.Count > 0)
+            {
+                foreach (var item in spellingItems)
+                    items.Add(item);
+                items.Add(env.CreateContextMenuItem(
+                    string.Empty, null, CoreWebView2ContextMenuItemKind.Separator));
+            }
 
             // Query window.__ctxInfo (set by our JS contextmenu listener).
             // The variable is already set by the time this handler runs,
