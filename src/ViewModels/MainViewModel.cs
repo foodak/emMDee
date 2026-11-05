@@ -618,7 +618,8 @@ public class MainViewModel : ObservableObject, IDisposable
             WindowHeight = height,
             WindowMaximized = maximized,
             ZoomFactor = zoomFactor,
-            TabScrollPositions = Tabs.Select(t => t.ScrollPosition).ToList()
+            TabScrollPositions = Tabs.Select(t => t.ScrollPosition).ToList(),
+            TabSelections = Tabs.Select(t => t.Selection).ToList()
         };
     }
 
@@ -652,6 +653,8 @@ public class MainViewModel : ObservableObject, IDisposable
             var tab = Models.TabItem.FromFile(path, content);
             if (i < data.TabScrollPositions.Count)
                 tab.ScrollPosition = data.TabScrollPositions[i];
+            if (i < data.TabSelections.Count)
+                tab.Selection = data.TabSelections[i];
             Tabs.Add(tab);
             _watchService.Watch(tab.FilePath);
         }

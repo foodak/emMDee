@@ -171,7 +171,7 @@
   // raw markdown corresponding to a DOM selection.
   var _sourceRanges = [];   // [{el: DOM element, start: number, end: number}]
 
-  function renderMarkdown(md, images, baseUrl, scrollY) {
+  function renderMarkdown(md, images, baseUrl, scrollY, selection) {
     // Reset source range tracking
     _sourceRanges = [];
     rawMarkdown = md;
@@ -241,10 +241,73 @@
       });
     }
 
+    // Put back the text selection the tab had when it was last shown.
+    // Selecting text never scrolls, so this does not fight the scroll restore.
+    _restoreSelection(selection);
+
     // Restore scroll position after all images have loaded (or decoded
     // for data: URIs). Without this, scrollTo fires before images expand
     // the layout and the restored position drifts.
     _restoreScrollAfterImages();
+  }
+
+  // --- Selection persistence ---
+  // A selection is saved as character offsets into the text of #content, which
+  // stay valid across re-renders of the same markdown (tab switch, restart).
+  // The first SELECTION_TEXT_MAX characters of the selected text ride along and
+  // must match on restore, so an edited file does not get a selection on the
+  // wrong words.
+  var SELECTION_TEXT_MAX = 256;
+
+  function getSelectionState() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var content = document.getElementById('content');
+    var range = sel.getRangeAt(0);
+    if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) return null;
+
+    var before = document.createRange();
+    before.setStart(content, 0);
+    before.setEnd(range.startContainer, range.startOffset);
+    var start = before.toString().length;
+    var text = range.toString();
+    if (!text) return null;
+    return { start: start, end: start + text.length, text: text.substring(0, SELECTION_TEXT_MAX) };
+  }
+
+  // Finds the text node and offset sitting at a character offset into root's text.
+  function _locateTextOffset(root, target) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    var pos = 0;
+    while (walker.nextNode()) {
+      var node = walker.currentNode;
+      var len = node.data.length;
+      if (target <= pos + len) return { node: node, offset: target - pos };
+      pos += len;
+    }
+    return null;
+  }
+
+  function _restoreSelection(state) {
+    if (!state || typeof state.start !== 'number' || typeof state.end !== 'number') return;
+    if (state.end <= state.start) return;
+    try {
+      var content = document.getElementById('content');
+      var from = _locateTextOffset(content, state.start);
+      var to = _locateTextOffset(content, state.end);
+      if (!from || !to) return;
+
+      var range = document.createRange();
+      range.setStart(from.node, from.offset);
+      range.setEnd(to.node, to.offset);
+      if (state.text && range.toString().substring(0, state.text.length) !== state.text) return;
+
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) {
+      // A selection that no longer fits the document is simply dropped.
+    }
   }
 
   var _pendingScrollY = null;
@@ -705,10 +768,13 @@
   // Expose renderMarkdown globally (called from C# via ExecuteScriptAsync)
   // Save the internal render function before replacing the global name
   var _renderMarkdown = renderMarkdown;
-  window.renderMarkdown = function(md, images, baseUrl, scrollY) {
+  window.renderMarkdown = function(md, images, baseUrl, scrollY, selection) {
     setRawMarkdown(md);
-    _renderMarkdown(md, images, baseUrl, scrollY);
+    _renderMarkdown(md, images, baseUrl, scrollY, selection);
   };
+
+  // Expose for C# to save the selection before a tab switch or on close
+  window.getSelectionState = getSelectionState;
 
   // Expose for C# to retrieve selected markdown
   window.getSelectedMarkdown = getSelectedMarkdown;

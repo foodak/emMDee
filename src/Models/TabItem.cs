@@ -31,6 +31,9 @@ public class TabItem : ObservableObject
     public bool IsModified { get; set; }
     public double ScrollPosition { get; set; }
 
+    /// <summary>Text selected in the preview when the tab was last shown (null if none).</summary>
+    public TextSelectionState? Selection { get; set; }
+
     // --- External-change tracking ---------------------------------------
 
     /// <summary>Last-write timestamp captured the last time we read the file.</summary>

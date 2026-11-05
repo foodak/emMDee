@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using emMDee.Models;
 using emMDee.Services;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
@@ -49,6 +50,7 @@ public partial class MarkdownPreviewControl : UserControl
     private string? _pendingMarkdown;
     private string? _pendingFilePath;
     private double _pendingScrollPosition;
+    private TextSelectionState? _pendingSelection;
     private double _pendingZoomFactor = 1.0;
     private (string text, bool forward)? _pendingSearch;
     private string? _lastRenderedMarkdown;
@@ -126,10 +128,11 @@ public partial class MarkdownPreviewControl : UserControl
 
                 if (_pendingMarkdown != null)
                 {
-                    RenderMarkdown(_pendingMarkdown, _pendingScrollPosition, _pendingFilePath);
+                    RenderMarkdown(_pendingMarkdown, _pendingScrollPosition, _pendingFilePath, _pendingSelection);
                     _pendingMarkdown = null;
                     _pendingFilePath = null;
                     _pendingScrollPosition = 0;
+                    _pendingSelection = null;
                 }
                 else if (_skipNextNavCompleted)
                 {
@@ -276,30 +279,51 @@ public partial class MarkdownPreviewControl : UserControl
             WebView.ZoomFactor = zoom;
     }
 
-    public async Task<double> GetScrollPositionAsync()
+    private static readonly JsonSerializerOptions _selectionJson = new()
     {
-        if (!_webViewReady) return 0;
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
+    /// <summary>
+    /// Reads the preview's scroll position and text selection in one round trip.
+    /// Returns null when the preview can't be read (not ready yet, or the script
+    /// failed), so callers keep what the tab already had instead of wiping it.
+    /// </summary>
+    public async Task<(double Scroll, TextSelectionState? Selection)?> GetViewStateAsync()
+    {
+        if (!_webViewReady) return null;
         try
         {
-            var result = await WebView.CoreWebView2.ExecuteScriptAsync("window.scrollY");
-            if (double.TryParse(result, System.Globalization.NumberStyles.Number,
-                System.Globalization.CultureInfo.InvariantCulture, out var pos))
-                return pos;
+            var result = await WebView.CoreWebView2.ExecuteScriptAsync(
+                "[window.scrollY, window.getSelectionState ? window.getSelectionState() : null]");
+            using var doc = JsonDocument.Parse(result);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 2)
+                return null;
+
+            var scroll = root[0].ValueKind == JsonValueKind.Number ? root[0].GetDouble() : 0;
+            var selection = root[1].ValueKind == JsonValueKind.Object
+                ? root[1].Deserialize<TextSelectionState>(_selectionJson)
+                : null;
+            return (scroll, selection);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"GetScrollPosition error: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"GetViewState error: {ex.Message}");
         }
-        return 0;
+        return null;
     }
 
-    public void RenderMarkdown(string markdown, double scrollPosition = 0, string? filePath = null)
+    public void RenderMarkdown(string markdown, double scrollPosition = 0, string? filePath = null,
+        TextSelectionState? selection = null)
     {
         if (!_webViewReady)
         {
             _pendingMarkdown = markdown;
             _pendingFilePath = filePath;
             _pendingScrollPosition = scrollPosition;
+            _pendingSelection = selection;
             return;
         }
 
@@ -312,6 +336,7 @@ public partial class MarkdownPreviewControl : UserControl
             _pendingMarkdown = markdown;
             _pendingFilePath = filePath;
             _pendingScrollPosition = scrollPosition;
+            _pendingSelection = selection;
             WebView.CoreWebView2.Navigate(_localPageUri);
             return;
         }
@@ -320,7 +345,7 @@ public partial class MarkdownPreviewControl : UserControl
         _lastRenderedFilePath = filePath;
 
         WebView.CoreWebView2.ExecuteScriptAsync(
-            BuildRenderScript(markdown, scrollPosition, filePath));
+            BuildRenderScript(markdown, scrollPosition, filePath, selection));
     }
 
     public void SearchInPreview(string searchText, bool forward = true)
@@ -362,13 +387,15 @@ public partial class MarkdownPreviewControl : UserControl
         return (-1, 0);
     }
 
-    public async Task RenderMarkdownAsync(string markdown, double scrollPosition = 0, string? filePath = null)
+    public async Task RenderMarkdownAsync(string markdown, double scrollPosition = 0, string? filePath = null,
+        TextSelectionState? selection = null)
     {
         if (!_webViewReady)
         {
             _pendingMarkdown = markdown;
             _pendingFilePath = filePath;
             _pendingScrollPosition = scrollPosition;
+            _pendingSelection = selection;
             return;
         }
 
@@ -380,6 +407,7 @@ public partial class MarkdownPreviewControl : UserControl
             _pendingMarkdown = markdown;
             _pendingFilePath = filePath;
             _pendingScrollPosition = scrollPosition;
+            _pendingSelection = selection;
             WebView.CoreWebView2.Navigate(_localPageUri);
             return;
         }
@@ -388,7 +416,7 @@ public partial class MarkdownPreviewControl : UserControl
         _lastRenderedFilePath = filePath;
 
         await WebView.CoreWebView2.ExecuteScriptAsync(
-            BuildRenderScript(markdown, scrollPosition, filePath));
+            BuildRenderScript(markdown, scrollPosition, filePath, selection));
     }
 
     /// <summary>
@@ -397,7 +425,8 @@ public partial class MarkdownPreviewControl : UserControl
     /// marked's lexer dies with a regex stack overflow on multi-megabyte base64
     /// lines, so the markdown only ever sees short emmdee-img://N placeholders.
     /// </summary>
-    private static string BuildRenderScript(string markdown, double scrollPosition, string? filePath)
+    private static string BuildRenderScript(string markdown, double scrollPosition, string? filePath,
+        TextSelectionState? selection)
     {
         var registry = new Dictionary<string, string>();
         var inlined = InlineLocalImages(markdown, filePath, registry);
@@ -409,7 +438,8 @@ public partial class MarkdownPreviewControl : UserControl
         var imagesJson = registry.Count > 0 ? JsonSerializer.Serialize(registry) : "null";
         var baseUrlJson = BuildBaseUrlJson(filePath);
         var posStr = scrollPosition.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return $"renderMarkdown(`{escaped}`, {imagesJson}, {baseUrlJson}, {posStr});";
+        var selectionJson = selection != null ? JsonSerializer.Serialize(selection, _selectionJson) : "null";
+        return $"renderMarkdown(`{escaped}`, {imagesJson}, {baseUrlJson}, {posStr}, {selectionJson});";
     }
 
     // Replaces relative image references in markdown with short emmdee-img://N

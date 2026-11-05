@@ -15,4 +15,5 @@ public class SessionData
     public bool WindowMaximized { get; set; }
     public double ZoomFactor { get; set; } = 1.0;
     public List<double> TabScrollPositions { get; set; } = new();
+    public List<TextSelectionState?> TabSelections { get; set; } = new();
 }

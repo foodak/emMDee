@@ -158,12 +158,24 @@ public partial class MainWindow : Window
             if (tabLeaving != null
                 && string.Equals(tabLeaving.FilePath, PreviewControl.LastRenderedFilePath,
                     StringComparison.OrdinalIgnoreCase))
-                tabLeaving.ScrollPosition = await PreviewControl.GetScrollPositionAsync();
+                await CaptureViewStateAsync(tabLeaving);
 
             UpdatePreviewForActiveTab();
             UpdateWelcomeVisibility();
             ScrollActiveTabIntoView();
         }
+    }
+
+    /// <summary>
+    /// Stores the preview's live scroll position and text selection on <paramref name="tab"/>.
+    /// Leaves the tab untouched when the preview can't be read, so a saved state isn't lost.
+    /// </summary>
+    private async Task CaptureViewStateAsync(Models.TabItem tab)
+    {
+        var state = await PreviewControl.GetViewStateAsync();
+        if (state is not { } s) return;
+        tab.ScrollPosition = s.Scroll;
+        tab.Selection = s.Selection;
     }
 
     private void ScrollActiveTabIntoView()
@@ -178,11 +190,11 @@ public partial class MainWindow : Window
 
     private async void OnRefreshRequested()
     {
-        // Capture the live scroll position before refreshing, so the user
-        // doesn't lose their place when pressing F5.
+        // Capture the live scroll position and selection before refreshing, so the
+        // user doesn't lose their place when pressing F5.
         var activeTab = _viewModel.ActiveTab;
         if (activeTab != null)
-            activeTab.ScrollPosition = await PreviewControl.GetScrollPositionAsync();
+            await CaptureViewStateAsync(activeTab);
 
         if (_viewModel.ReloadActiveTab())
             UpdatePreviewForActiveTab();
@@ -198,7 +210,7 @@ public partial class MainWindow : Window
         }
 
         PreviewControl.Visibility = Visibility.Visible;
-        PreviewControl.RenderMarkdown(activeTab.MarkdownContent, activeTab.ScrollPosition, activeTab.FilePath);
+        PreviewControl.RenderMarkdown(activeTab.MarkdownContent, activeTab.ScrollPosition, activeTab.FilePath, activeTab.Selection);
     }
 
     private void UpdateWelcomeVisibility()
@@ -225,9 +237,9 @@ public partial class MainWindow : Window
         var tabs = _viewModel.Tabs;
         if (tabs.Count <= 1) return;
 
-        // Save current tab's scroll before we start moving
+        // Save current tab's scroll and selection before we start moving
         if (_viewModel.ActiveTab != null)
-            _viewModel.ActiveTab.ScrollPosition = await PreviewControl.GetScrollPositionAsync();
+            await CaptureViewStateAsync(_viewModel.ActiveTab);
 
         int startIndex = _viewModel.ActiveTab != null ? tabs.IndexOf(_viewModel.ActiveTab) : 0;
         int checkIndex = startIndex;
@@ -248,7 +260,7 @@ public partial class MainWindow : Window
             _viewModel.ActiveTab = candidateTab;
 
             PreviewControl.Visibility = Visibility.Visible;
-            await PreviewControl.RenderMarkdownAsync(candidateTab.MarkdownContent, candidateTab.ScrollPosition, candidateTab.FilePath);
+            await PreviewControl.RenderMarkdownAsync(candidateTab.MarkdownContent, candidateTab.ScrollPosition, candidateTab.FilePath, candidateTab.Selection);
             UpdateWelcomeVisibility();
 
             bool noMatch = await PreviewControl.SearchInPreviewAsync(
@@ -264,7 +276,7 @@ public partial class MainWindow : Window
         var startTab = tabs[startIndex];
         _viewModel.ActiveTab = startTab;
         PreviewControl.Visibility = Visibility.Visible;
-        await PreviewControl.RenderMarkdownAsync(startTab.MarkdownContent, startTab.ScrollPosition, startTab.FilePath);
+        await PreviewControl.RenderMarkdownAsync(startTab.MarkdownContent, startTab.ScrollPosition, startTab.FilePath, startTab.Selection);
         UpdateWelcomeVisibility();
 
         await PreviewControl.SearchInPreviewAsync(_viewModel.SearchText, forward, fromStart: true);
@@ -280,9 +292,9 @@ public partial class MainWindow : Window
 
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 
-        // Save the active tab's scroll position before closing
+        // Save the active tab's scroll position and selection before closing
         if (_viewModel.ActiveTab != null)
-            _viewModel.ActiveTab.ScrollPosition = await PreviewControl.GetScrollPositionAsync();
+            await CaptureViewStateAsync(_viewModel.ActiveTab);
 
         _viewModel.SaveSession(Left, Top, Width, Height, WindowState == WindowState.Maximized, PreviewControl.ZoomFactor);
         _viewModel.Dispose();
