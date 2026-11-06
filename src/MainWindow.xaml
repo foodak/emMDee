@@ -216,7 +216,8 @@
                                         Padding="10,6"
                                         Margin="0,0,0,0"
                                         CornerRadius="4,4,0,0"
-                                        Cursor="Hand">
+                                        Cursor="Hand"
+                                        ToolTip="{Binding FilePath}">
                                     <Border.ContextMenu>
                                         <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                             <MenuItem Header="Copy Path" Click="CopyPathMenuItem_Click"/>
@@ -235,6 +236,7 @@
                                                 BorderThickness="0"
                                                 Cursor="Hand"
                                                 Click="CloseTabButton_Click"
+                                                ToolTip="Close"
                                                 Tag="{Binding}"/>
                                         <TextBlock Text="●"
                                                    DockPanel.Dock="Right"
